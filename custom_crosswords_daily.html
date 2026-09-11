@@ -205,9 +205,18 @@
     <input type="text" id="topic-input" placeholder="e.g. lighthouses, jazz music, houseplants..." value="lighthouses">
     <button id="generate-btn" onclick="generateCustomPuzzle()">Generate</button>
   </div>
+  <div class="topic-input-row" style="margin-top: -4px;">
+    <select id="difficulty-select" style="padding: 8px 10px; border-radius: 8px; border: 1px solid #ccc;">
+      <option value="easy">Easy</option>
+      <option value="medium" selected>Medium</option>
+      <option value="hard">Hard</option>
+    </select>
+    <button id="recommend-btn" onclick="recommendDifficulty()" style="background: var(--gold);">Recommend for me</button>
+  </div>
   <div id="custom-status" class="status">Enter any topic and tap Generate.</div>
   <div id="custom-grid-container"></div>
   <div class="note">Calls your backend's <code>/generate_puzzle</code>, which asks Claude for a word bank server-side (your API key never touches the browser) and runs it through your real generator2.py compaction pipeline — not a simplified approximation. Requires the backend to be running.</div>
+  <div class="note">"Recommend for me" calls <code>/recommend_difficulty</code>, based on solve-time and hint-usage history for this topic logged by everyone who's played it on this server so far (not yet personalized per player -- that needs accounts, which don't exist yet).</div>
 </div>
 
 <script>
@@ -594,8 +603,34 @@ function adaptBackendPuzzle(data) {
   return { width: data.grid_w, height: data.grid_h, cells: data.grid, placed: data.placed };
 }
 
+async function recommendDifficulty() {
+  const topic = document.getElementById('topic-input').value.trim();
+  const statusEl = document.getElementById('custom-status');
+  if (!topic) {
+    statusEl.textContent = 'Enter a topic first.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t fetch a recommendation.';
+    return;
+  }
+  statusEl.textContent = `Checking solve history for "${topic}"...`;
+  try {
+    const res = await fetch(`${API_BASE_URL}/recommend_difficulty?topic=${encodeURIComponent(topic)}`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+    const data = await res.json();
+    document.getElementById('difficulty-select').value = data.recommended_difficulty;
+    statusEl.textContent = `Recommended: ${data.recommended_difficulty} (${data.reason})`;
+  } catch (err) {
+    statusEl.textContent = 'Error fetching recommendation: ' + err.message;
+  }
+}
+
 async function generateCustomPuzzle() {
   const topic = document.getElementById('topic-input').value.trim();
+  const difficulty = document.getElementById('difficulty-select').value;
   const statusEl = document.getElementById('custom-status');
   const btn = document.getElementById('generate-btn');
   if (!topic) {
@@ -610,14 +645,14 @@ async function generateCustomPuzzle() {
   }
 
   btn.disabled = true;
-  statusEl.textContent = `Asking your backend to generate a puzzle for "${topic}"...`;
+  statusEl.textContent = `Asking your backend to generate a ${difficulty} puzzle for "${topic}"...`;
   document.getElementById('custom-grid-container').innerHTML = '';
 
   try {
     const res = await fetch(`${API_BASE_URL}/generate_puzzle`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic, num_words: 13 }),
+      body: JSON.stringify({ topic, num_words: 13, difficulty }),
       signal: AbortSignal.timeout(30000), // word-bank generation + grid placement can take a few seconds
     });
     if (!res.ok) {
@@ -629,7 +664,7 @@ async function generateCustomPuzzle() {
     renderPuzzle('custom-grid-container', puzzle, topic);
     statusEl.textContent =
       `Placed ${puzzle.placed.length} of ${data.word_bank_used.length} words for "${topic}" ` +
-      `(via your real generator2.py engine).`;
+      `(${difficulty}, via your real generator2.py engine).`;
   } catch (err) {
     statusEl.textContent = 'Error generating puzzle: ' + err.message;
   } finally {
