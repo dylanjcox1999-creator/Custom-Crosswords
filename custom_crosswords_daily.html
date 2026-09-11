@@ -213,7 +213,7 @@
 </div>
 
 <div class="section">
-  <h2>📅 On This Day — September 10</h2>
+  <h2 id="otd-title">📅 On This Day</h2>
   <div id="otd-status" class="status">Ready.</div>
   <div id="otd-grid-container"></div>
   <div class="note">Seeded from verified historical events for today's date (Jamestown, Battle of Lake Erie, Elias Howe's sewing machine patent, and more). In production this pulls from a maintained historical-events database each day rather than being hardcoded like this demo.</div>
@@ -694,6 +694,7 @@ function renderPuzzle(containerId, puzzle, topic) {
 // no data for today yet.
 async function loadOnThisDayPuzzle() {
   const statusEl = document.getElementById('otd-status');
+  const titleEl = document.getElementById('otd-title');
 
   if (backendAvailable) {
     try {
@@ -705,6 +706,8 @@ async function loadOnThisDayPuzzle() {
         const data = await res.json();
         const puzzle = adaptBackendPuzzle(data);
         renderPuzzle('otd-grid-container', puzzle, 'on_this_day_' + data.date);
+        const niceDate = new Date(data.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+        titleEl.textContent = `📅 On This Day — ${niceDate}`;
         statusEl.textContent = `Placed ${puzzle.placed.length} of ${data.word_bank_used ? data.word_bank_used.length : puzzle.placed.length} words for ${data.date} (live from your backend).`;
         return;
       }
@@ -717,6 +720,7 @@ async function loadOnThisDayPuzzle() {
   // Local fallback: the one hardcoded, verified sample (September 10)
   const puzzle = buildCrossword(OTD_WORDS);
   renderPuzzle('otd-grid-container', puzzle, 'on_this_day_fallback_sept_10');
+  titleEl.textContent = '📅 On This Day — September 10 (fallback sample)';
   statusEl.textContent =
     `Placed ${puzzle.placed.length} of ${OTD_WORDS.length} words. ` +
     `(Local fallback for September 10 -- backend unavailable or has no data for today yet.)`;
