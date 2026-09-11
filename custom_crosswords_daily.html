@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Custom Crosswords Daily — Prototype</title>
+<style>
+  :root {
+    --navy: #152A47;
+    --gold: #B08D57;
+    --cream: #F5F1E8;
+    --green: #1F3B2C;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--cream);
+    color: #222;
+    margin: 0;
+    padding: 20px;
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  h1 {
+    color: var(--navy);
+    font-size: 1.5em;
+    text-align: center;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #666;
+    font-size: 0.85em;
+    margin-bottom: 24px;
+  }
+  .section {
+    background: white;
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  .section h2 {
+    color: var(--navy);
+    font-size: 1.1em;
+    margin-top: 0;
+    border-bottom: 2px solid var(--gold);
+    padding-bottom: 8px;
+  }
+  .note {
+    font-size: 0.78em;
+    color: #888;
+    font-style: italic;
+    margin-top: 6px;
+  }
+  .topic-input-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  input[type=text] {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-size: 1em;
+  }
+  button {
+    background: var(--navy);
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 0.95em;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:disabled { background: #999; cursor: default; }
+  button:hover:not(:disabled) { background: #1e3a5f; }
+  .status {
+    font-size: 0.85em;
+    color: var(--navy);
+    min-height: 18px;
+    margin-bottom: 8px;
+  }
+  .grid-wrap {
+    display: flex;
+    justify-content: center;
+    margin: 16px 0;
+    overflow-x: auto;
+  }
+  .grid {
+    display: grid;
+    gap: 1px;
+    background: #333;
+    border: 2px solid #333;
+  }
+  .cell {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    background: white;
+  }
+  .cell.blocked { background: #333; }
+  .cell input {
+    width: 100%;
+    height: 100%;
+    border: none;
+    text-align: center;
+    text-transform: uppercase;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 0;
+    background: transparent;
+  }
+  .cell input:focus { outline: 2px solid var(--gold); outline-offset: -2px; }
+  .cell .num {
+    position: absolute;
+    top: 1px;
+    left: 2px;
+    font-size: 8px;
+    color: #555;
+    pointer-events: none;
+  }
+  .cell.correct input { background: #d9f2d9; }
+  .cell.wrong input { background: #f8d7d7; }
+  .clues {
+    display: flex;
+    gap: 24px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .clue-col { flex: 1; min-width: 200px; }
+  .clue-col h3 {
+    color: var(--gold);
+    font-size: 0.9em;
+    margin-bottom: 6px;
+  }
+  .clue-col div { font-size: 0.82em; margin-bottom: 5px; line-height: 1.3; }
+  .clue-col b { color: var(--navy); }
+  .check-btn { margin-top: 10px; margin-right: 8px; }
+  .timer {
+    font-family: 'SF Mono', Consolas, monospace;
+    font-size: 1.3em;
+    font-weight: 700;
+    color: var(--navy);
+    background: var(--cream);
+    display: inline-block;
+    padding: 6px 14px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    margin-right: 10px;
+  }
+  .backend-status {
+    display: inline-block;
+    font-size: 0.75em;
+    padding: 5px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+  }
+  .backend-status.connected { background: #d9f2d9; color: #1a6b1a; }
+  .backend-status.offline { background: #f0e2c4; color: #8a6414; }
+  .clue-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .hint-btn {
+    background: var(--gold);
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 0.7em;
+    padding: 3px 8px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .hint-btn:disabled { background: #ccc; cursor: default; }
+  .hint-text {
+    font-size: 0.78em;
+    color: #a5720d;
+    font-style: italic;
+    margin: 2px 0 6px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>Custom Crosswords Daily</h1>
+<div class="subtitle">Live prototype — topic-to-puzzle generation + today's real "On This Day" puzzle</div>
+<div style="text-align:center; margin-bottom: 18px;">
+  <span id="backend-indicator" class="backend-status offline">Backend: checking...</span>
+</div>
+
+<div class="section">
+  <h2>📅 On This Day — September 10</h2>
+  <div id="otd-status" class="status">Ready.</div>
+  <div id="otd-grid-container"></div>
+  <div class="note">Seeded from verified historical events for today's date (Jamestown, Battle of Lake Erie, Elias Howe's sewing machine patent, and more). In production this pulls from a maintained historical-events database each day rather than being hardcoded like this demo.</div>
+</div>
+
+<div class="section">
+  <h2>🧩 Generate a Puzzle From Any Topic</h2>
+  <div class="topic-input-row">
+    <input type="text" id="topic-input" placeholder="e.g. lighthouses, jazz music, houseplants..." value="lighthouses">
+    <button id="generate-btn" onclick="generateCustomPuzzle()">Generate</button>
+  </div>
+  <div id="custom-status" class="status">Enter any topic and tap Generate.</div>
+  <div id="custom-grid-container"></div>
+  <div class="note">Calls your backend's <code>/generate_puzzle</code>, which asks Claude for a word bank server-side (your API key never touches the browser) and runs it through your real generator2.py compaction pipeline — not a simplified approximation. Requires the backend to be running.</div>
+</div>
+
+<script>
+// ---------- Backend connection ----------
+// Point this at your running `uvicorn main:app` instance (see backend/README.md).
+// Everything below degrades gracefully to local computation if the backend
+// isn't reachable -- this file works standalone either way.
+const API_BASE_URL = 'https://custom-crosswords.onrender.com';
+let backendAvailable = false;
+
+async function checkBackendHealth() {
+  const indicator = document.getElementById('backend-indicator');
+  try {
+    const res = await fetch(`${API_BASE_URL}/health`, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) {
+      backendAvailable = true;
+      indicator.textContent = 'Backend: connected (hints & solve-tracking are live)';
+      indicator.className = 'backend-status connected';
+      return;
+    }
+  } catch (e) {
+    // fall through to offline state
+  }
+  backendAvailable = false;
+  indicator.textContent = 'Backend: not running — using local fallback (see README to start it)';
+  indicator.className = 'backend-status offline';
+}
+
+async function fetchHintFromBackend(word, clue, hint, tier) {
+  const res = await fetch(`${API_BASE_URL}/hint`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ word, clue, hint, tier }),
+    signal: AbortSignal.timeout(3000),
+  });
+  if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+  const data = await res.json();
+  return { tier: data.tier, text: data.text, isReveal: data.is_reveal };
+}
+
+async function submitSolveToBackend(topic, solveTimeSeconds, hintsUsed, completed) {
+  const res = await fetch(`${API_BASE_URL}/submit_solve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      topic, solve_time_seconds: solveTimeSeconds,
+      hints_used: hintsUsed, completed,
+    }),
+    signal: AbortSignal.timeout(3000),
+  });
+  if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+  return await res.json();
+}
+
+// ---------- On This Day seed data (verified via search, not AI-generated) ----------
+const OTD_WORDS = [
+  {word: "JAMESTOWN", clue: "First permanent English settlement, where John Smith became council president on this day in 1608", hint: "Where John Smith became council president in 1608"},
+  {word: "PERRY", clue: "Oliver Hazard ___, U.S. Captain who won the Battle of Lake Erie on this day in 1813", hint: "The U.S. Captain's last name from the Battle of Lake Erie"},
+  {word: "HOWE", clue: "Elias ___, who patented the sewing machine on this day in 1846", hint: "The last name of the sewing machine's patent holder"},
+  {word: "CANADA", clue: "Country that declared war on Nazi Germany on this day in 1939", hint: "North American country that joined WWII on this date"},
+  {word: "PERSHING", clue: "General John J. ___, whose troops were welcomed home to NYC on this day in 1919", hint: "The general whose WWI troops came home to a NYC welcome"},
+  {word: "QUISLING", clue: "Vidkun ___, sentenced to death for Nazi collaboration on this day in 1945", hint: "A name that later became a word meaning \"traitor\""},
+  {word: "VIRGINIA", clue: "Colony where Jamestown was founded", hint: "The U.S. state that was home to the first English colony"},
+  {word: "PATENT", clue: "Legal protection Elias Howe received for his invention", hint: "What an inventor gets to protect their new idea"},
+  {word: "SOLDIERS", clue: "25,000 of these were welcomed home to New York City in 1919", hint: "Who NYC welcomed home by the thousands after WWI"}
+];
+
+// ---------- Three-tier hint system (local fallback -- mirrors backend hints.py exactly) ----------
+function getHintLocal(word, clue, softHint, tier) {
+  word = word.toUpperCase().trim();
+  if (tier === 1) return { tier: 1, text: softHint || clue, isReveal: false };
+  if (tier === 2) return { tier: 2, text: `Starts with "${word[0]}" — ${word.length} letters`, isReveal: false };
+  return { tier: 3, text: word, isReveal: true };
+}
+
+// ---------- Simple client-side crossword placement engine ----------
+function buildCrossword(entries) {
+  entries = entries.slice().sort((a, b) => b.word.length - a.word.length);
+  let cells = {}; // "r,c" -> letter
+  let placed = [];
+
+  function canPlace(word, row, col, dir) {
+    for (let i = 0; i < word.length; i++) {
+      let r = dir === 'D' ? row + i : row;
+      let c = dir === 'A' ? col + i : col;
+      let key = r + "," + c;
+      if (cells[key] !== undefined && cells[key] !== word[i]) return false;
+    }
+    // check cells immediately before/after don't collide with other letters
+    let beforeR = dir === 'D' ? row - 1 : row;
+    let beforeC = dir === 'A' ? col - 1 : col;
+    let afterR = dir === 'D' ? row + word.length : row;
+    let afterC = dir === 'A' ? col + word.length : col;
+    if (cells[beforeR + "," + beforeC] !== undefined) return false;
+    if (cells[afterR + "," + afterC] !== undefined) return false;
+    return true;
+  }
+
+  function place(word, row, col, dir, clue, hint) {
+    for (let i = 0; i < word.length; i++) {
+      let r = dir === 'D' ? row + i : row;
+      let c = dir === 'A' ? col + i : col;
+      cells[r + "," + c] = word[i];
+    }
+    placed.push({word, row, col, dir, clue, hint});
+  }
+
+  // place first (longest) word horizontally at origin
+  place(entries[0].word, 0, 0, 'A', entries[0].clue, entries[0].hint);
+
+  for (let i = 1; i < entries.length; i++) {
+    let word = entries[i].word;
+    let clue = entries[i].clue;
+    let hint = entries[i].hint;
+    let candidates = [];
+    for (let li = 0; li < word.length; li++) {
+      let letter = word[li];
+      for (let key in cells) {
+        if (cells[key] !== letter) continue;
+        let [er, ec] = key.split(',').map(Number);
+        // try placing vertically through this intersection
+        let row = er - li, col = ec;
+        if (canPlace(word, row, col, 'D')) {
+          candidates.push({row, col, dir: 'D'});
+        }
+        // try placing horizontally through this intersection
+        row = er; col = ec - li;
+        if (canPlace(word, row, col, 'A')) {
+          candidates.push({row, col, dir: 'A'});
+        }
+      }
+    }
+    if (candidates.length > 0) {
+      // prefer the candidate closest to the grid center (0,0) for compactness
+      candidates.sort((a, b) => (Math.abs(a.row) + Math.abs(a.col)) - (Math.abs(b.row) + Math.abs(b.col)));
+      let c = candidates[0];
+      place(word, c.row, c.col, c.dir, clue, hint);
+    }
+    // if no valid intersection found, word is skipped in this simplified demo engine
+  }
+
+  // normalize coordinates to be non-negative
+  let minR = Infinity, minC = Infinity, maxR = -Infinity, maxC = -Infinity;
+  for (let key in cells) {
+    let [r, c] = key.split(',').map(Number);
+    minR = Math.min(minR, r); maxR = Math.max(maxR, r);
+    minC = Math.min(minC, c); maxC = Math.max(maxC, c);
+  }
+  let normCells = {};
+  for (let key in cells) {
+    let [r, c] = key.split(',').map(Number);
+    normCells[(r - minR) + "," + (c - minC)] = cells[key];
+  }
+  let normPlaced = placed.map(p => ({
+    ...p, row: p.row - minR, col: p.col - minC
+  }));
+
+  // assign numbers
+  let numMap = {};
+  let counter = 1;
+  let sorted = [...normPlaced].sort((a, b) => (a.row - b.row) || (a.col - b.col));
+  let seen = {};
+  for (let p of sorted) {
+    let key = p.row + "," + p.col;
+    if (!(key in seen)) {
+      seen[key] = counter++;
+    }
+    numMap[key] = seen[key];
+  }
+  // renumber properly in grid reading order (row major) for standard crossword numbering
+  let startCells = new Set();
+  for (let p of normPlaced) {
+    startCells.add(p.row + "," + p.col);
+  }
+  let ordered = Array.from(startCells).map(k => {
+    let [r, c] = k.split(',').map(Number);
+    return {r, c};
+  }).sort((a, b) => (a.r - b.r) || (a.c - b.c));
+  let finalNum = {};
+  ordered.forEach((s, idx) => { finalNum[s.r + "," + s.c] = idx + 1; });
+  normPlaced.forEach(p => { p.num = finalNum[p.row + "," + p.col]; });
+
+  let width = maxC - minC + 1, height = maxR - minR + 1;
+  return {cells: normCells, placed: normPlaced, width, height};
+}
+
+// ---------- Rendering ----------
+function renderPuzzle(containerId, puzzle, topic) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+
+  // ---- Chronometer ----
+  const timerEl = document.createElement('div');
+  timerEl.className = 'timer';
+  timerEl.textContent = '⏱ 00:00';
+  container.appendChild(timerEl);
+
+  const timerState = { seconds: 0, running: true, intervalId: null, alreadySubmitted: false };
+  function formatTime(s) {
+    const m = Math.floor(s / 60).toString().padStart(2, '0');
+    const sec = (s % 60).toString().padStart(2, '0');
+    return `⏱ ${m}:${sec}`;
+  }
+  timerState.intervalId = setInterval(() => {
+    if (!timerState.running) return;
+    timerState.seconds += 1;
+    timerEl.textContent = formatTime(timerState.seconds);
+  }, 1000);
+
+  async function stopTimerAndSubmit(hintsUsedCount) {
+    if (timerState.alreadySubmitted) return; // guard against double-fire
+    timerState.alreadySubmitted = true;
+    timerState.running = false;
+    clearInterval(timerState.intervalId);
+    const baseLabel = `Solved! (${hintsUsedCount} hint${hintsUsedCount === 1 ? '' : 's'} used)`;
+    timerEl.textContent = `${formatTime(timerState.seconds)} — ${baseLabel}`;
+
+    if (backendAvailable) {
+      try {
+        const result = await submitSolveToBackend(topic, timerState.seconds, hintsUsedCount, true);
+        timerEl.textContent =
+          `${formatTime(timerState.seconds)} — ${baseLabel} · avg for this topic: ` +
+          `${result.average_solve_time_seconds_this_topic}s over ${result.topic_attempts_logged_this_session} attempt(s)`;
+      } catch (e) {
+        timerEl.textContent = `${formatTime(timerState.seconds)} — ${baseLabel} (solve-log submit failed: ${e.message})`;
+      }
+    }
+  }
+
+  const gridWrap = document.createElement('div');
+  gridWrap.className = 'grid-wrap';
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  grid.style.gridTemplateColumns = `repeat(${puzzle.width}, 30px)`;
+  grid.style.gridTemplateRows = `repeat(${puzzle.height}, 30px)`;
+
+  const numMap = {};
+  puzzle.placed.forEach(p => { numMap[p.row + "," + p.col] = p.num; });
+
+  const inputs = {};
+  let hintsUsedCount = 0;
+
+  function checkFullSolve() {
+    for (let key in inputs) {
+      if (inputs[key].value !== inputs[key].dataset.answer) return false;
+    }
+    return true;
+  }
+
+  for (let r = 0; r < puzzle.height; r++) {
+    for (let c = 0; c < puzzle.width; c++) {
+      const key = r + "," + c;
+      const cellDiv = document.createElement('div');
+      if (puzzle.cells[key] === undefined) {
+        cellDiv.className = 'cell blocked';
+      } else {
+        cellDiv.className = 'cell';
+        if (numMap[key]) {
+          const num = document.createElement('div');
+          num.className = 'num';
+          num.textContent = numMap[key];
+          cellDiv.appendChild(num);
+        }
+        const input = document.createElement('input');
+        input.maxLength = 1;
+        input.dataset.answer = puzzle.cells[key];
+        input.dataset.row = r;
+        input.dataset.col = c;
+        input.addEventListener('input', (e) => {
+          e.target.value = e.target.value.toUpperCase();
+          if (e.target.value) {
+            const next = inputs[r + "," + (c + 1)];
+            if (next) next.focus();
+          }
+          if (checkFullSolve()) {
+            stopTimerAndSubmit(hintsUsedCount);
+          }
+        });
+        inputs[key] = input;
+        cellDiv.appendChild(input);
+      }
+      grid.appendChild(cellDiv);
+    }
+  }
+  gridWrap.appendChild(grid);
+  container.appendChild(gridWrap);
+
+  const checkBtn = document.createElement('button');
+  checkBtn.className = 'check-btn';
+  checkBtn.textContent = 'Check Answers';
+  checkBtn.onclick = () => {
+    for (let key in inputs) {
+      const inp = inputs[key];
+      const cellDiv = inp.parentElement;
+      cellDiv.classList.remove('correct', 'wrong');
+      if (!inp.value) continue;
+      if (inp.value === inp.dataset.answer) cellDiv.classList.add('correct');
+      else cellDiv.classList.add('wrong');
+    }
+    if (checkFullSolve()) {
+      stopTimerAndSubmit(hintsUsedCount);
+    }
+  };
+  container.appendChild(checkBtn);
+
+  const clues = document.createElement('div');
+  clues.className = 'clues';
+  const across = puzzle.placed.filter(p => p.dir === 'A').sort((a,b) => a.num - b.num);
+  const down = puzzle.placed.filter(p => p.dir === 'D').sort((a,b) => a.num - b.num);
+
+  function clueCol(title, items) {
+    const col = document.createElement('div');
+    col.className = 'clue-col';
+    const h3 = document.createElement('h3');
+    h3.textContent = title;
+    col.appendChild(h3);
+    items.forEach(p => {
+      const line = document.createElement('div');
+      line.className = 'clue-line';
+      const text = document.createElement('div');
+      text.innerHTML = `<b>${p.num}.</b> ${p.clue}`;
+      const hintBtn = document.createElement('button');
+      hintBtn.className = 'hint-btn';
+      hintBtn.textContent = 'Hint';
+      const hintTextEl = document.createElement('div');
+      hintTextEl.className = 'hint-text';
+      hintTextEl.style.display = 'none';
+
+      let currentTier = 0;
+      hintBtn.onclick = async () => {
+        currentTier += 1;
+        const tierToUse = Math.min(currentTier, 3);
+        hintBtn.disabled = true;
+        let h;
+        if (backendAvailable) {
+          try {
+            h = await fetchHintFromBackend(p.word, p.clue, p.hint || p.clue, tierToUse);
+          } catch (e) {
+            h = getHintLocal(p.word, p.clue, p.hint || p.clue, tierToUse);
+            h.text += ' (local fallback -- backend call failed)';
+          }
+        } else {
+          h = getHintLocal(p.word, p.clue, p.hint || p.clue, tierToUse);
+        }
+        hintsUsedCount += 1;
+        hintTextEl.style.display = 'block';
+        hintTextEl.textContent = `💡 ${h.text}`;
+        if (h.isReveal) {
+          hintBtn.textContent = 'Revealed';
+        } else {
+          hintBtn.disabled = false;
+          hintBtn.textContent = `Hint (tier ${currentTier + 1})`;
+        }
+      };
+
+      line.appendChild(text);
+      line.appendChild(hintBtn);
+      col.appendChild(line);
+      col.appendChild(hintTextEl);
+    });
+    return col;
+  }
+  clues.appendChild(clueCol('Across', across));
+  clues.appendChild(clueCol('Down', down));
+  container.appendChild(clues);
+}
+
+// ---------- On This Day puzzle (loads immediately) ----------
+window.addEventListener('DOMContentLoaded', () => {
+  checkBackendHealth();
+  const puzzle = buildCrossword(OTD_WORDS);
+  renderPuzzle('otd-grid-container', puzzle, 'on_this_day_' + new Date().toISOString().slice(0,10));
+  document.getElementById('otd-status').textContent =
+    `Placed ${puzzle.placed.length} of ${OTD_WORDS.length} words.`;
+});
+
+// ---------- Custom topic generation ----------
+// Routes through your own backend's /generate_puzzle, which holds the
+// Anthropic API key server-side and runs the real generator2.py pipeline.
+// This deliberately does NOT call the Anthropic API directly from the
+// browser -- doing so would expose your API key to anyone who views the
+// page source, since a downloaded HTML file has no way to keep a secret.
+function adaptBackendPuzzle(data) {
+  return { width: data.grid_w, height: data.grid_h, cells: data.grid, placed: data.placed };
+}
+
+async function generateCustomPuzzle() {
+  const topic = document.getElementById('topic-input').value.trim();
+  const statusEl = document.getElementById('custom-status');
+  const btn = document.getElementById('generate-btn');
+  if (!topic) {
+    statusEl.textContent = 'Enter a topic first.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent =
+      '⚠ Backend not connected. Custom topic generation needs your backend running ' +
+      '(uvicorn main:app) so your Anthropic API key stays server-side. See backend/README.md.';
+    return;
+  }
+
+  btn.disabled = true;
+  statusEl.textContent = `Asking your backend to generate a puzzle for "${topic}"...`;
+  document.getElementById('custom-grid-container').innerHTML = '';
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/generate_puzzle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, num_words: 13 }),
+      signal: AbortSignal.timeout(30000), // word-bank generation + grid placement can take a few seconds
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.detail || `Backend returned ${res.status}`);
+    }
+    const data = await res.json();
+    const puzzle = adaptBackendPuzzle(data);
+    renderPuzzle('custom-grid-container', puzzle, topic);
+    statusEl.textContent =
+      `Placed ${puzzle.placed.length} of ${data.word_bank_used.length} words for "${topic}" ` +
+      `(via your real generator2.py engine).`;
+  } catch (err) {
+    statusEl.textContent = 'Error generating puzzle: ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+
+</body>
+</html>
