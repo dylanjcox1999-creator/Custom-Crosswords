@@ -687,14 +687,45 @@ function renderPuzzle(containerId, puzzle, topic) {
   container.appendChild(clues);
 }
 
-// ---------- On This Day puzzle (loads immediately) ----------
-window.addEventListener('DOMContentLoaded', () => {
-  updateAuthUI();
-  checkBackendHealth();
+// ---------- On This Day puzzle ----------
+// Calls the backend's real /on_this_day endpoint (today's actual date,
+// pulling live Wikipedia data grounded through Claude) with a fallback to
+// the one hardcoded, verified sample if the backend is unreachable or has
+// no data for today yet.
+async function loadOnThisDayPuzzle() {
+  const statusEl = document.getElementById('otd-status');
+
+  if (backendAvailable) {
+    try {
+      statusEl.textContent = 'Loading today\'s real On This Day puzzle...';
+      const res = await fetch(`${API_BASE_URL}/on_this_day`, {
+        signal: AbortSignal.timeout(15000), // first request for a new date can take a few seconds (live Wikipedia + Claude call)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const puzzle = adaptBackendPuzzle(data);
+        renderPuzzle('otd-grid-container', puzzle, 'on_this_day_' + data.date);
+        statusEl.textContent = `Placed ${puzzle.placed.length} of ${data.word_bank_used ? data.word_bank_used.length : puzzle.placed.length} words for ${data.date} (live from your backend).`;
+        return;
+      }
+      // fall through to local fallback on a non-OK response (e.g. no data yet for today)
+    } catch (err) {
+      // fall through to local fallback on any network/timeout error
+    }
+  }
+
+  // Local fallback: the one hardcoded, verified sample (September 10)
   const puzzle = buildCrossword(OTD_WORDS);
-  renderPuzzle('otd-grid-container', puzzle, 'on_this_day_' + new Date().toISOString().slice(0,10));
-  document.getElementById('otd-status').textContent =
-    `Placed ${puzzle.placed.length} of ${OTD_WORDS.length} words.`;
+  renderPuzzle('otd-grid-container', puzzle, 'on_this_day_fallback_sept_10');
+  statusEl.textContent =
+    `Placed ${puzzle.placed.length} of ${OTD_WORDS.length} words. ` +
+    `(Local fallback for September 10 -- backend unavailable or has no data for today yet.)`;
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  updateAuthUI();
+  await checkBackendHealth();
+  await loadOnThisDayPuzzle();
 });
 
 // ---------- Custom topic generation ----------
