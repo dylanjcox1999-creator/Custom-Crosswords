@@ -25,13 +25,13 @@ from hints import get_hint, VALID_TIERS
 
 app = FastAPI(title="Custom Crosswords Daily API")
 
-# Allows the prototype HTML file (opened directly as file://, or served from
-# a different origin/port during development) to call this API from the
-# browser. Tighten this to your actual frontend's origin before shipping to
-# real users -- "*" is fine for local development only.
+# Restricted to the actual frontend's origin (GitHub Pages) now that it's
+# known, rather than the wide-open "*" used during initial debugging.
+# Note: CORS matches scheme+host only, not the full path -- so this covers
+# the whole dylanjcox1999-creator.github.io site, not just one page on it.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://dylanjcox1999-creator.github.io"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
