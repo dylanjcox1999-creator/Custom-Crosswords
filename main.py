@@ -2,33 +2,40 @@
 Custom Crosswords Daily — backend API
 
 Endpoints:
-  POST /generate_puzzle   { "topic": str, "num_words": int? }
-  GET  /on_this_day       ?date=YYYY-MM-DD (optional, defaults to today)
+  POST /signup             { "email": str, "password": str }
+  POST /login               { "email": str, "password": str }
+  POST /generate_puzzle    { "topic": str, "num_words": int?, "difficulty": str? }
+  GET  /on_this_day        ?date=YYYY-MM-DD (optional, defaults to today)
+  POST /submit_solve       (requires auth) logs a per-user solve record
+  GET  /recommend_difficulty?topic=...  (requires auth) per-user recommendation
 
 Run locally:
   pip install -r requirements.txt
   export ANTHROPIC_API_KEY=sk-ant-...
+  export JWT_SECRET_KEY=some-long-random-string
+  export DATABASE_URL=postgresql://...   (see README -- required for real persistence)
   uvicorn main:app --reload
 """
-import sys
 import datetime
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+import jwt as pyjwt
 
 from compact_lib import compact_search
 from claude_wordbank import generate_word_bank
 from historical_events import get_events_for_date
 from hints import get_hint, VALID_TIERS
+import auth
+import database
+from database import get_db, User, SolveRecord
 
 app = FastAPI(title="Custom Crosswords Daily API")
 
-# Restricted to the actual frontend's origin (GitHub Pages) now that it's
-# known, rather than the wide-open "*" used during initial debugging.
-# Note: CORS matches scheme+host only, not the full path -- so this covers
-# the whole dylanjcox1999-creator.github.io site, not just one page on it.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://dylanjcox1999-creator.github.io"],
@@ -36,11 +43,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory store for solve-time submissions. NOT a real database -- resets
-# every time the server restarts. This is here to prove the shape of the
-# feature (recording solve time + hints used per topic) so it can be swapped
-# for a real DB once accounts exist. See README for the honest scope note.
-_solve_log = []
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+@app.on_event("startup")
+def on_startup():
+    database.init_db()
 
 
 class TopicRequest(BaseModel):
@@ -58,9 +66,41 @@ class HintRequest(BaseModel):
 
 class SolveSubmission(BaseModel):
     topic: str
+    difficulty: str = "medium"
     solve_time_seconds: float
     hints_used: int = 0
     completed: bool = True
+
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+def get_current_user(
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    """FastAPI dependency: validates the Authorization: Bearer <token> header
+    and returns the corresponding User, or raises 401."""
+    if creds is None:
+        raise HTTPException(status_code=401, detail="Missing Authorization header.")
+    try:
+        payload = auth.decode_access_token(creds.credentials)
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Session expired, please log in again.")
+    except pyjwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid session token.")
+
+    user = db.query(User).filter(User.id == int(payload["sub"])).first()
+    if user is None:
+        raise HTTPException(status_code=401, detail="User no longer exists.")
+    return user
 
 
 def build_puzzle_response(entries, hints=None, seed_base=1):
@@ -91,6 +131,44 @@ def build_puzzle_response(entries, hints=None, seed_base=1):
         "unplaced_words": gen.unplaced,
     }
 
+
+# ---------------- Accounts ----------------
+
+@app.post("/signup")
+def signup(req: SignupRequest, db: Session = Depends(get_db)):
+    email = req.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="A valid email is required.")
+    if len(req.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+
+    existing = db.query(User).filter(User.email == email).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
+
+    user = User(email=email, password_hash=auth.hash_password(req.password))
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    token = auth.create_access_token(user_id=user.id, email=user.email)
+    return {"access_token": token, "token_type": "bearer", "email": user.email}
+
+
+@app.post("/login")
+def login(req: LoginRequest, db: Session = Depends(get_db)):
+    email = req.email.strip().lower()
+    user = db.query(User).filter(User.email == email).first()
+    if user is None or not auth.verify_password(req.password, user.password_hash):
+        # Deliberately the same error for "no such user" and "wrong password"
+        # -- don't leak which emails have accounts.
+        raise HTTPException(status_code=401, detail="Incorrect email or password.")
+
+    token = auth.create_access_token(user_id=user.id, email=user.email)
+    return {"access_token": token, "token_type": "bearer", "email": user.email}
+
+
+# ---------------- Puzzles (no login required) ----------------
 
 @app.post("/generate_puzzle")
 def generate_puzzle(req: TopicRequest):
@@ -144,40 +222,57 @@ def hint(req: HintRequest):
     return get_hint(req.word, req.clue, req.hint, req.tier)
 
 
-@app.post("/submit_solve")
-def submit_solve(req: SolveSubmission):
-    """Records a completed (or abandoned) solve attempt: topic, time taken,
-    hints used. This is the raw data a future adaptive-difficulty engine
-    would train on -- this endpoint only logs it in memory for now, it does
-    not yet adjust anything. Meaningful adaptive difficulty needs accounts
-    (to track a given player over time) which isn't built yet -- see README."""
-    entry = req.model_dump()
-    entry["logged_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    _solve_log.append(entry)
+# ---------------- Progress tracking (login required) ----------------
 
-    same_topic = [s for s in _solve_log if s["topic"] == req.topic]
-    avg_time = sum(s["solve_time_seconds"] for s in same_topic) / len(same_topic)
+@app.post("/submit_solve")
+def submit_solve(
+    req: SolveSubmission,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Records a completed (or abandoned) solve attempt against the logged-in
+    user's account -- this is now real, personal history, not a shared
+    in-memory list. Persists as long as DATABASE_URL points at a real
+    hosted Postgres instance (see README)."""
+    record = SolveRecord(
+        user_id=current_user.id,
+        topic=req.topic,
+        difficulty=req.difficulty,
+        solve_time_seconds=req.solve_time_seconds,
+        hints_used=req.hints_used,
+        completed=req.completed,
+    )
+    db.add(record)
+    db.commit()
+
+    same_topic = (
+        db.query(SolveRecord)
+        .filter(SolveRecord.user_id == current_user.id, SolveRecord.topic == req.topic)
+        .all()
+    )
+    avg_time = sum(s.solve_time_seconds for s in same_topic) / len(same_topic)
 
     return {
         "recorded": True,
-        "topic_attempts_logged_this_session": len(same_topic),
+        "topic_attempts_logged": len(same_topic),
         "average_solve_time_seconds_this_topic": round(avg_time, 1),
     }
 
 
 @app.get("/recommend_difficulty")
-def recommend_difficulty(topic: str):
-    """Recommends a difficulty level for `topic` based on solve history logged
-    so far via /submit_solve.
-
-    HONEST SCOPE NOTE: this is aggregated across everyone who has played this
-    topic on this server since it last restarted (no accounts exist yet), not
-    a personalized per-player recommendation. It's a real, working step
-    toward adaptive difficulty, not the finished feature -- once accounts
-    exist, this same logic should be scoped to a single player's history
-    instead of the whole server's.
-    """
-    same_topic = [s for s in _solve_log if s["topic"] == topic]
+def recommend_difficulty(
+    topic: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Recommends a difficulty level for `topic` based on THIS user's own
+    solve history -- genuinely personalized now that accounts exist, not
+    the aggregate-across-everyone placeholder from before."""
+    same_topic = (
+        db.query(SolveRecord)
+        .filter(SolveRecord.user_id == current_user.id, SolveRecord.topic == topic)
+        .all()
+    )
     if len(same_topic) < 2:
         return {
             "topic": topic,
@@ -186,19 +281,19 @@ def recommend_difficulty(topic: str):
             "attempts_considered": len(same_topic),
         }
 
-    avg_hints = sum(s["hints_used"] for s in same_topic) / len(same_topic)
-    avg_time = sum(s["solve_time_seconds"] for s in same_topic) / len(same_topic)
-    completion_rate = sum(1 for s in same_topic if s["completed"]) / len(same_topic)
+    avg_hints = sum(s.hints_used for s in same_topic) / len(same_topic)
+    avg_time = sum(s.solve_time_seconds for s in same_topic) / len(same_topic)
+    completion_rate = sum(1 for s in same_topic if s.completed) / len(same_topic)
 
     if avg_hints < 0.5 and completion_rate >= 0.8:
         recommendation = "hard"
-        reason = f"Low hint usage (avg {avg_hints:.1f}) and a high completion rate ({completion_rate:.0%}) suggest this topic is too easy at the current level."
+        reason = f"Low hint usage (avg {avg_hints:.1f}) and a high completion rate ({completion_rate:.0%}) suggest this topic is too easy for you at the current level."
     elif avg_hints > 1.5 or completion_rate < 0.5:
         recommendation = "easy"
-        reason = f"High hint usage (avg {avg_hints:.1f}) or a low completion rate ({completion_rate:.0%}) suggest this topic is currently too hard."
+        reason = f"High hint usage (avg {avg_hints:.1f}) or a low completion rate ({completion_rate:.0%}) suggest this topic is currently too hard for you."
     else:
         recommendation = "medium"
-        reason = f"Hint usage (avg {avg_hints:.1f}) and completion rate ({completion_rate:.0%}) both look reasonable at the current level."
+        reason = f"Your hint usage (avg {avg_hints:.1f}) and completion rate ({completion_rate:.0%}) both look reasonable at the current level."
 
     return {
         "topic": topic,

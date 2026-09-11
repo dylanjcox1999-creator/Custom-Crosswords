@@ -1,0 +1,73 @@
+"""
+Auth core: password hashing and JWT session tokens.
+
+Password hashing uses Python's standard-library hashlib.pbkdf2_hmac
+(the same algorithm family Django used by default for years) rather than
+requiring bcrypt/passlib as an extra dependency -- this keeps auth fully
+testable without needing anything installed beyond the standard library.
+
+JWT tokens use PyJWT. Set JWT_SECRET_KEY in your environment for
+production; a random one is generated at import time as a fallback so
+local testing still works, but that fallback is NOT stable across
+restarts and must never be relied on in production (every restart would
+invalidate every existing session).
+"""
+import os
+import hmac
+import hashlib
+import secrets
+import datetime
+
+import jwt
+
+PBKDF2_ITERATIONS = 260_000
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_HOURS = 24 * 30  # 30-day sessions
+
+_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+if not _SECRET_KEY:
+    _SECRET_KEY = secrets.token_hex(32)
+    print(
+        "WARNING: JWT_SECRET_KEY not set in environment -- using a random "
+        "key generated for this process only. All sessions will be "
+        "invalidated on restart. Set JWT_SECRET_KEY for production."
+    )
+
+
+def hash_password(password: str) -> str:
+    """Returns a salted password hash in the form 'salt_hex$hash_hex'."""
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), bytes.fromhex(salt), PBKDF2_ITERATIONS
+    )
+    return f"{salt}${digest.hex()}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Checks `password` against a hash produced by hash_password(). Uses a
+    constant-time comparison to avoid timing attacks."""
+    try:
+        salt, digest_hex = stored_hash.split("$")
+    except ValueError:
+        return False
+    computed = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), bytes.fromhex(salt), PBKDF2_ITERATIONS
+    )
+    return hmac.compare_digest(computed.hex(), digest_hex)
+
+
+def create_access_token(user_id: int, email: str) -> str:
+    payload = {
+        "sub": str(user_id),
+        "email": email,
+        "exp": datetime.datetime.now(datetime.timezone.utc)
+        + datetime.timedelta(hours=JWT_EXPIRY_HOURS),
+        "iat": datetime.datetime.now(datetime.timezone.utc),
+    }
+    return jwt.encode(payload, _SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def decode_access_token(token: str) -> dict:
+    """Returns the decoded payload if valid. Raises jwt.InvalidTokenError
+    (or a subclass, e.g. jwt.ExpiredSignatureError) if not."""
+    return jwt.decode(token, _SECRET_KEY, algorithms=[JWT_ALGORITHM])
