@@ -10,6 +10,8 @@ import json
 import re
 from anthropic import Anthropic
 
+from entry_dedup import dedupe_overlapping_clues
+
 client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 WORD_BANK_PROMPT = """Generate a crossword word bank for the topic "{topic}" at {difficulty} difficulty.
@@ -101,6 +103,11 @@ def generate_word_bank(topic: str, n_words: int = 13, difficulty: str = "medium"
         seen_words.add(word)
         cleaned.append((word, clue))
         hints[word] = hint if hint else clue  # fall back to the clue if Claude omitted a hint
+
+    # Safety net: drop any entry whose clue overlaps too much with one
+    # already kept (e.g. two words both clued from basically the same fact).
+    cleaned = dedupe_overlapping_clues(cleaned)
+    hints = {w: h for w, h in hints.items() if w in {c[0] for c in cleaned}}
 
     if len(cleaned) < 5:
         raise ValueError(
