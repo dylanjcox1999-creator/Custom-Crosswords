@@ -3,109 +3,129 @@
 Real backend API: Claude generates a topical word bank on request, then your
 actual crossword generator (`generator2.py` + `compact_lib.py`, the same
 engine used to build every book in this series) places it into a grid.
-No more JS approximation — this is the real thing.
+Accounts, solve-history tracking, and personalized difficulty recommendations
+are now real, backed by a real database -- not the in-memory placeholder used
+earlier in this project.
 
 ## Setup
 
 ```
 pip install -r requirements.txt
 export ANTHROPIC_API_KEY=sk-ant-...
+export JWT_SECRET_KEY=<a long random string -- see below>
+export DATABASE_URL=postgresql://...   (see "Database" section below -- required)
 uvicorn main:app --reload
 ```
 
-Then it's running at `http://localhost:8000`.
+### Generating a JWT_SECRET_KEY
+Any long random string works. One easy way:
+```
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+Set this in your environment (or Render's "Environment" tab). **If it's not
+set, the app will still run using a randomly generated key, but every
+restart invalidates all existing logins** -- fine for quick local testing,
+not acceptable for anything real.
+
+## Database -- read this before deploying
+
+**Render's free web service tier has an ephemeral filesystem.** Any local
+file (including a SQLite database file) gets wiped every time the service
+redeploys or spins down from inactivity. This means accounts and solve
+history would silently reset, over and over, if the database lived on
+Render's own free compute.
+
+**The fix: use a real hosted Postgres database, separate from Render's web
+service.** Two options with genuinely permanent free tiers:
+- **Supabase** (supabase.com) -- free Postgres, doesn't expire
+- **Neon** (neon.tech) -- free serverless Postgres, doesn't expire
+
+(Render also offers its own free Postgres, but that free tier **expires
+after 30 days** -- fine for a demo, not for anything you want to keep
+working.)
+
+Whichever you pick, copy its connection string and set it as `DATABASE_URL`
+in Render's Environment tab. The code expects a standard
+`postgresql://user:pass@host:port/dbname` URL -- both Supabase and Neon give
+you exactly that from their dashboard.
+
+If `DATABASE_URL` isn't set at all, the app falls back to a local SQLite
+file (`local_dev.db`) so you can still run and test everything on your own
+machine -- just don't rely on that fallback once it's deployed anywhere with
+an ephemeral filesystem.
 
 ## Endpoints
 
+### `POST /signup`
+```
+{"email": "you@example.com", "password": "at least 8 characters"}
+```
+Creates an account, returns `{"access_token": "...", "token_type": "bearer"}`.
+
+### `POST /login`
+```
+{"email": "you@example.com", "password": "..."}
+```
+Same response shape as signup. Use this token as
+`Authorization: Bearer <token>` on the two endpoints below.
+
+### `POST /submit_solve` (requires login)
+```
+{"topic": "lighthouses", "difficulty": "medium", "solve_time_seconds": 145.2, "hints_used": 1, "completed": true}
+```
+Logs the attempt against your account specifically -- this is now real,
+persistent, per-player history, not a shared session-wide list.
+
+### `GET /recommend_difficulty?topic=...` (requires login)
+Now genuinely personalized: looks at **your own** solve history for that
+topic (not everyone's), and recommends easy/medium/hard accordingly.
+
 ### `POST /generate_puzzle`
 ```
-{"topic": "lighthouses", "num_words": 13}
+{"topic": "lighthouses", "num_words": 13, "difficulty": "medium"}
 ```
-Calls Claude to write a word bank for the topic, then runs it through the
-real generator. Returns the same JSON shape used throughout the book
-pipeline: `grid_w`, `grid_h`, `grid`, `placed` (each entry has word, clue,
-row, col, dir, num).
+No login required -- generating and playing a puzzle stays open to anyone.
+Login is only needed to save progress and get personalized recommendations.
 
 ### `GET /on_this_day?date=2026-09-10`
-Same output shape. `date` is optional and defaults to today. Pulls from
-`historical_events.py`.
+Same as always, no login required.
 
 ### `POST /hint`
-```
-{"word": "BEACON", "clue": "...", "hint": "...", "tier": 1}
-```
-Returns `{"tier": 1, "text": "...", "is_reveal": false}`. The prototype HTML
-file calls this live when a player taps the hint button, falling back to
-identical local logic if the backend isn't reachable.
-
-### `POST /submit_solve`
-```
-{"topic": "lighthouses", "solve_time_seconds": 145.2, "hints_used": 1, "completed": true}
-```
-Logs the attempt in memory and returns a running average for that topic.
-The prototype calls this automatically the moment a puzzle is fully solved.
+Same as always, no login required.
 
 ### `GET /health`
-Returns `{"status": "ok"}` — the prototype HTML pings this on load to decide
-whether to show "Backend: connected" or fall back to local computation.
-
-## Connecting the prototype HTML to this backend
-
-`custom_crosswords_daily.html` now has a real `fetch()`-based integration,
-not just a placeholder. Open `main.py`'s CORS settings before relying on
-this beyond local testing -- `allow_origins=["*"]` is set for convenience
-during development and should be locked down to your actual frontend's
-origin before this touches real users.
-
-To test the live connection yourself:
-1. `uvicorn main:app --reload` (with `ANTHROPIC_API_KEY` set)
-2. Open `custom_crosswords_daily.html` in a browser
-3. Within ~2 seconds the "Backend: checking..." indicator should flip to
-   "Backend: connected" -- if it stays on "not running", check the browser
-   console for the actual fetch error (most likely CORS or the server not
-   being up on port 8000)
+Returns `{"status": "ok"}`.
 
 ## What's been tested, and how
 
-I don't have live internet access in the sandbox I built this in, so I
-could not call the real Claude API or install `fastapi`/`uvicorn` there to
-launch an actual HTTP server. Here's exactly what was and wasn't verified
-before this was handed to you:
+**Verified, fully, offline:**
+- Password hashing (`auth.py`): correct hash format, correct-password
+  verification, wrong-password rejection, and confirmed salting actually
+  produces different hashes for the same password each time
+- JWT tokens (`auth.py`): full create/decode round trip with real claims,
+  a tampered token correctly rejected, an expired token correctly rejected
+- All three new/changed Python files compile with no syntax errors
+- The adaptive-difficulty recommendation logic itself (four real scenarios:
+  insufficient data, "breezing through", "struggling", and "moderate")
+  -- unchanged by this update, still correct
 
-**Verified, offline, using the real generator:**
-- `/on_this_day` full pipeline: real Sept 10 historical data → real
-  `compact_search()` → placed 9 of 9 words into an 11x11 grid
-- `/generate_puzzle` downstream pipeline: a simulated Claude response (10
-  words/clues about lighthouses) → real `compact_search()` → placed 10 of
-  10 words into a 9x13 grid with correct across/down numbering
-- All three Python files compile with no syntax errors
-
-**Not yet verified — needs to happen in your environment:**
-- The actual live call to the Claude API in `claude_wordbank.py` (network
-  access, your API key, and Claude's real output format all need
-  confirming together)
-- Running the FastAPI server itself end-to-end (`uvicorn main:app`) and
-  hitting it over HTTP
-- Claude occasionally returning malformed JSON or fewer than the requested
-  word count — `claude_wordbank.py` has basic retry-worthy validation
-  (drops bad entries, raises a clear error if fewer than 5 remain), but
-  this hasn't been stress-tested against real model output yet
-
-**A known real limitation, not a bug:**
-`historical_events.py` only has verified data for one sample date
-(September 10). It's built as a clean, swappable function
-(`get_events_for_date`) specifically so you can wire in a real source —
-Wikipedia's "On this day" API is a reasonable free starting point — without
-touching anything else. Do not fill this out using an LLM with no grounding
-source; historical dates are exactly the kind of content where a model can
-generate confident, plausible, wrong answers.
+**Not verified here, needs to happen in your environment:**
+- `database.py`'s actual SQLAlchemy behavior -- I don't have SQLAlchemy
+  installed in the sandbox I built this in (no network access to install
+  new packages), so table creation and querying are written using standard,
+  well-established patterns but haven't been executed. Test this by running
+  `uvicorn main:app --reload` locally and trying signup → login →
+  submit_solve → recommend_difficulty end to end.
+- A real connection to Supabase/Neon specifically -- the connection string
+  handling (including the `postgres://` → `postgresql://` normalization,
+  needed because some providers still hand out the old URL scheme) is
+  written defensively but untested against a real live database.
 
 ## Suggested next steps
-1. Run this locally, confirm the live Claude call actually behaves like the
-   mocked test did
-2. Wire `historical_events.py` to a real data source
-3. Add basic caching (today's `/on_this_day` puzzle should generate once and
-   be served to everyone, not regenerated per request)
-4. From here, the earlier product plan's remaining pieces — adaptive
-   difficulty, the tiered hint system, accounts — sit on top of this API
-   rather than inside it
+1. Set up Supabase or Neon, get `DATABASE_URL`, deploy, and confirm
+   signup/login/submit_solve/recommend_difficulty actually work end to end
+2. Wire the frontend's login/signup UI to these endpoints (see
+   `custom_crosswords_daily.html`)
+3. Expand `historical_events.py` beyond the one verified sample date
+4. Consider rate-limiting `/signup` and `/login` before this is public --
+   right now there's nothing stopping repeated login attempts
