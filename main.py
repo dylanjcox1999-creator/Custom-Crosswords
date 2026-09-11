@@ -46,6 +46,7 @@ _solve_log = []
 class TopicRequest(BaseModel):
     topic: str
     num_words: int = 13
+    difficulty: str = "medium"  # "easy" | "medium" | "hard"
 
 
 class HintRequest(BaseModel):
@@ -99,12 +100,15 @@ def generate_puzzle(req: TopicRequest):
         raise HTTPException(status_code=400, detail="num_words must be between 5 and 20.")
 
     try:
-        entries, hints = generate_word_bank(req.topic.strip(), n_words=req.num_words)
+        entries, hints = generate_word_bank(
+            req.topic.strip(), n_words=req.num_words, difficulty=req.difficulty
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     result = build_puzzle_response(entries, hints=hints, seed_base=abs(hash(req.topic)) % 10000)
     result["topic"] = req.topic
+    result["difficulty"] = req.difficulty
     result["word_bank_used"] = [{"word": w, "clue": c, "hint": hints.get(w, c)} for w, c in entries]
     return result
 
@@ -158,6 +162,54 @@ def submit_solve(req: SolveSubmission):
         "recorded": True,
         "topic_attempts_logged_this_session": len(same_topic),
         "average_solve_time_seconds_this_topic": round(avg_time, 1),
+    }
+
+
+@app.get("/recommend_difficulty")
+def recommend_difficulty(topic: str):
+    """Recommends a difficulty level for `topic` based on solve history logged
+    so far via /submit_solve.
+
+    HONEST SCOPE NOTE: this is aggregated across everyone who has played this
+    topic on this server since it last restarted (no accounts exist yet), not
+    a personalized per-player recommendation. It's a real, working step
+    toward adaptive difficulty, not the finished feature -- once accounts
+    exist, this same logic should be scoped to a single player's history
+    instead of the whole server's.
+    """
+    same_topic = [s for s in _solve_log if s["topic"] == topic]
+    if len(same_topic) < 2:
+        return {
+            "topic": topic,
+            "recommended_difficulty": "medium",
+            "reason": "Not enough solve history for this topic yet (need at least 2 attempts) -- defaulting to medium.",
+            "attempts_considered": len(same_topic),
+        }
+
+    avg_hints = sum(s["hints_used"] for s in same_topic) / len(same_topic)
+    avg_time = sum(s["solve_time_seconds"] for s in same_topic) / len(same_topic)
+    completion_rate = sum(1 for s in same_topic if s["completed"]) / len(same_topic)
+
+    if avg_hints < 0.5 and completion_rate >= 0.8:
+        recommendation = "hard"
+        reason = f"Low hint usage (avg {avg_hints:.1f}) and a high completion rate ({completion_rate:.0%}) suggest this topic is too easy at the current level."
+    elif avg_hints > 1.5 or completion_rate < 0.5:
+        recommendation = "easy"
+        reason = f"High hint usage (avg {avg_hints:.1f}) or a low completion rate ({completion_rate:.0%}) suggest this topic is currently too hard."
+    else:
+        recommendation = "medium"
+        reason = f"Hint usage (avg {avg_hints:.1f}) and completion rate ({completion_rate:.0%}) both look reasonable at the current level."
+
+    return {
+        "topic": topic,
+        "recommended_difficulty": recommendation,
+        "reason": reason,
+        "attempts_considered": len(same_topic),
+        "stats": {
+            "average_hints_used": round(avg_hints, 2),
+            "average_solve_time_seconds": round(avg_time, 1),
+            "completion_rate": round(completion_rate, 2),
+        },
     }
 
 

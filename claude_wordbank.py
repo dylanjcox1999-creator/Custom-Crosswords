@@ -12,7 +12,7 @@ from anthropic import Anthropic
 
 client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
-WORD_BANK_PROMPT = """Generate a crossword word bank for the topic "{topic}".
+WORD_BANK_PROMPT = """Generate a crossword word bank for the topic "{topic}" at {difficulty} difficulty.
 
 Return ONLY a JSON array (no markdown fences, no preamble, no commentary) of
 exactly {n} objects. Each object must have:
@@ -25,28 +25,57 @@ exactly {n} objects. Each object must have:
     without simply restating the word. This is shown as a "help" step before
     the player gives up and reveals the answer outright.
 
+Difficulty guidance for "{difficulty}":
+{difficulty_guidance}
+
 Requirements:
   - All {n} words must be distinct
   - All words must be genuinely and specifically relevant to "{topic}"
-  - Prefer common, well-known terms over obscure ones so the puzzle is
-    solvable by a general audience
   - Vary word length where possible (this helps the crossword grid interlock)
 
 Return the JSON array only."""
 
+DIFFICULTY_GUIDANCE = {
+    "easy": (
+        "Use common, everyday words a general audience would recognize immediately. "
+        "Clues should be direct and straightforward, minimal wordplay or ambiguity. "
+        "Avoid obscure terminology, technical jargon, or words requiring specialized knowledge."
+    ),
+    "medium": (
+        "Use a mix of common and moderately specific words related to the topic. "
+        "Clues can require a bit of thought but shouldn't need expert knowledge."
+    ),
+    "hard": (
+        "Use more specific, advanced, or less common vocabulary related to the topic -- "
+        "the kind of terms someone knowledgeable about the subject would know. "
+        "Clues can be more indirect, use wordplay, or require making a connection rather "
+        "than stating the answer plainly."
+    ),
+}
 
-def generate_word_bank(topic: str, n_words: int = 13):
+VALID_DIFFICULTIES = ("easy", "medium", "hard")
+
+
+def generate_word_bank(topic: str, n_words: int = 13, difficulty: str = "medium"):
     """
-    Calls Claude to generate a word bank for `topic`.
+    Calls Claude to generate a word bank for `topic` at the given `difficulty`.
     Returns (entries, hints) where:
       entries -- list of (WORD, clue) tuples, ready for the crossword generator
       hints   -- dict {WORD: hint_text} for the tiered hint system
-    Raises ValueError if Claude's response can't be parsed as valid entries.
+    Raises ValueError if `difficulty` is invalid or Claude's response can't be
+    parsed as valid entries.
     """
+    if difficulty not in VALID_DIFFICULTIES:
+        raise ValueError(f"difficulty must be one of {VALID_DIFFICULTIES}, got '{difficulty}'")
+
+    prompt = WORD_BANK_PROMPT.format(
+        topic=topic, n=n_words, difficulty=difficulty,
+        difficulty_guidance=DIFFICULTY_GUIDANCE[difficulty],
+    )
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1800,
-        messages=[{"role": "user", "content": WORD_BANK_PROMPT.format(topic=topic, n=n_words)}],
+        messages=[{"role": "user", "content": prompt}],
     )
     raw_text = "".join(block.text for block in response.content if hasattr(block, "text"))
     raw_text = re.sub(r"```json|```", "", raw_text).strip()
