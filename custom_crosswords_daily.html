@@ -192,6 +192,26 @@
   <span id="backend-indicator" class="backend-status offline">Backend: checking...</span>
 </div>
 
+<div class="section" id="auth-section">
+  <h2>👤 Account</h2>
+  <div id="logged-out-view">
+    <div class="topic-input-row">
+      <input type="text" id="auth-email" placeholder="email" autocomplete="username">
+      <input type="password" id="auth-password" placeholder="password (8+ chars)" autocomplete="current-password">
+    </div>
+    <div class="topic-input-row">
+      <button onclick="doLogin()">Log In</button>
+      <button onclick="doSignup()" style="background: var(--gold);">Sign Up</button>
+    </div>
+  </div>
+  <div id="logged-in-view" style="display:none;">
+    Logged in as <b id="logged-in-email"></b>.
+    <button onclick="doLogout()" style="margin-left: 8px;">Log Out</button>
+  </div>
+  <div id="auth-status" class="status"></div>
+  <div class="note">Login is only needed to save solve history and get personalized difficulty recommendations. Generating and playing puzzles works without an account.</div>
+</div>
+
 <div class="section">
   <h2>📅 On This Day — September 10</h2>
   <div id="otd-status" class="status">Ready.</div>
@@ -227,6 +247,79 @@
 const API_BASE_URL = 'https://custom-crosswords.onrender.com';
 let backendAvailable = false;
 
+// ---------- Auth ----------
+// Token persists in localStorage so a logged-in player stays logged in
+// across page reloads, not just within one session.
+let authToken = localStorage.getItem('cc_auth_token') || null;
+let authEmail = localStorage.getItem('cc_auth_email') || null;
+
+function updateAuthUI() {
+  const loggedOut = document.getElementById('logged-out-view');
+  const loggedIn = document.getElementById('logged-in-view');
+  if (authToken) {
+    loggedOut.style.display = 'none';
+    loggedIn.style.display = 'block';
+    document.getElementById('logged-in-email').textContent = authEmail;
+  } else {
+    loggedOut.style.display = 'block';
+    loggedIn.style.display = 'none';
+  }
+}
+
+function setAuth(token, email) {
+  authToken = token;
+  authEmail = email;
+  localStorage.setItem('cc_auth_token', token);
+  localStorage.setItem('cc_auth_email', email);
+  updateAuthUI();
+}
+
+function doLogout() {
+  authToken = null;
+  authEmail = null;
+  localStorage.removeItem('cc_auth_token');
+  localStorage.removeItem('cc_auth_email');
+  updateAuthUI();
+  document.getElementById('auth-status').textContent = 'Logged out.';
+}
+
+async function doSignup() {
+  await authRequest('/signup', 'Account created and logged in.');
+}
+
+async function doLogin() {
+  await authRequest('/login', 'Logged in.');
+}
+
+async function authRequest(path, successMessage) {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const statusEl = document.getElementById('auth-status');
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t log in right now.';
+    return;
+  }
+  if (!email || !password) {
+    statusEl.textContent = 'Enter both an email and a password.';
+    return;
+  }
+  statusEl.textContent = 'Working...';
+  try {
+    const res = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+    setAuth(data.access_token, data.email);
+    statusEl.textContent = successMessage;
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
 async function checkBackendHealth() {
   const indicator = document.getElementById('backend-indicator');
   try {
@@ -257,16 +350,26 @@ async function fetchHintFromBackend(word, clue, hint, tier) {
   return { tier: data.tier, text: data.text, isReveal: data.is_reveal };
 }
 
-async function submitSolveToBackend(topic, solveTimeSeconds, hintsUsed, completed) {
+async function submitSolveToBackend(topic, solveTimeSeconds, hintsUsed, completed, difficulty) {
+  if (!authToken) {
+    throw new Error('not logged in -- log in to save solve history and get personalized recommendations');
+  }
   const res = await fetch(`${API_BASE_URL}/submit_solve`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${authToken}`,
+    },
     body: JSON.stringify({
-      topic, solve_time_seconds: solveTimeSeconds,
+      topic, difficulty: difficulty || 'medium', solve_time_seconds: solveTimeSeconds,
       hints_used: hintsUsed, completed,
     }),
     signal: AbortSignal.timeout(3000),
   });
+  if (res.status === 401) {
+    doLogout();
+    throw new Error('session expired -- please log in again');
+  }
   if (!res.ok) throw new Error(`Backend returned ${res.status}`);
   return await res.json();
 }
@@ -586,6 +689,7 @@ function renderPuzzle(containerId, puzzle, topic) {
 
 // ---------- On This Day puzzle (loads immediately) ----------
 window.addEventListener('DOMContentLoaded', () => {
+  updateAuthUI();
   checkBackendHealth();
   const puzzle = buildCrossword(OTD_WORDS);
   renderPuzzle('otd-grid-container', puzzle, 'on_this_day_' + new Date().toISOString().slice(0,10));
@@ -614,11 +718,20 @@ async function recommendDifficulty() {
     statusEl.textContent = '⚠ Backend not connected -- can\'t fetch a recommendation.';
     return;
   }
-  statusEl.textContent = `Checking solve history for "${topic}"...`;
+  if (!authToken) {
+    statusEl.textContent = '⚠ Log in first -- recommendations are based on your own solve history.';
+    return;
+  }
+  statusEl.textContent = `Checking your solve history for "${topic}"...`;
   try {
     const res = await fetch(`${API_BASE_URL}/recommend_difficulty?topic=${encodeURIComponent(topic)}`, {
+      headers: { 'Authorization': `Bearer ${authToken}` },
       signal: AbortSignal.timeout(5000),
     });
+    if (res.status === 401) {
+      doLogout();
+      throw new Error('session expired -- please log in again');
+    }
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
     const data = await res.json();
     document.getElementById('difficulty-select').value = data.recommended_difficulty;
