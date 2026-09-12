@@ -30,6 +30,7 @@ from compact_lib import compact_search
 from claude_wordbank import generate_word_bank
 from historical_events import get_events_for_date
 from hints import get_hint, VALID_TIERS
+from topic_recommender import recommend_topics
 import auth
 import database
 from database import get_db, User, SolveRecord
@@ -305,6 +306,40 @@ def recommend_difficulty(
             "average_solve_time_seconds": round(avg_time, 1),
             "completion_rate": round(completion_rate, 2),
         },
+    }
+
+
+@app.get("/recommend_topics")
+def get_recommend_topics(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Suggests new topics based on the logged-in user's own play history.
+    Always returns something usable -- falls back to a diverse starter set
+    for new users or if the live recommendation call fails, rather than
+    ever erroring out on this endpoint."""
+    records = (
+        db.query(SolveRecord)
+        .filter(SolveRecord.user_id == current_user.id)
+        .all()
+    )
+    # One representative entry per topic (most recent attempt), not one
+    # entry per solve -- a topic played 5 times shouldn't just dominate
+    # the history by volume.
+    by_topic = {}
+    for r in records:
+        by_topic[r.topic] = {
+            "topic": r.topic,
+            "hints_used": r.hints_used,
+            "completed": r.completed,
+        }
+    history = list(by_topic.values())
+
+    topics = recommend_topics(history, n=5)
+    return {
+        "suggested_topics": topics,
+        "based_on_history": len(history) > 0,
+        "topics_considered": len(history),
     }
 
 

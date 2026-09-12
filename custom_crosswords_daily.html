@@ -182,6 +182,16 @@
     font-style: italic;
     margin: 2px 0 6px 0;
   }
+  .topic-chip {
+    background: var(--tan, #f0e6d2);
+    border: 1px solid var(--gold);
+    color: var(--navy);
+    padding: 6px 12px;
+    border-radius: 16px;
+    font-size: 0.85em;
+    cursor: pointer;
+  }
+  .topic-chip:hover { background: var(--gold); color: white; }
 </style>
 </head>
 <body>
@@ -233,10 +243,15 @@
     </select>
     <button id="recommend-btn" onclick="recommendDifficulty()" style="background: var(--gold);">Recommend for me</button>
   </div>
+  <div class="topic-input-row" style="margin-top: -4px;">
+    <button id="suggest-topics-btn" onclick="suggestTopics()" style="background: var(--navy); width: 100%;">✨ Suggest topics for me</button>
+  </div>
+  <div id="topic-suggestions" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
   <div id="custom-status" class="status">Enter any topic and tap Generate.</div>
   <div id="custom-grid-container"></div>
   <div class="note">Calls your backend's <code>/generate_puzzle</code>, which asks Claude for a word bank server-side (your API key never touches the browser) and runs it through your real generator2.py compaction pipeline — not a simplified approximation. Requires the backend to be running.</div>
-  <div class="note">"Recommend for me" calls <code>/recommend_difficulty</code>, based on solve-time and hint-usage history for this topic logged by everyone who's played it on this server so far (not yet personalized per player -- that needs accounts, which don't exist yet).</div>
+  <div class="note">"Recommend for me" calls <code>/recommend_difficulty</code>, personalized to your own solve-time and hint-usage history for this topic (requires login).</div>
+  <div class="note">"Suggest topics for me" calls <code>/recommend_topics</code>, which looks at what you've played before and suggests new, related topics via Claude -- or a diverse starter set if you're new or not logged in.</div>
 </div>
 
 <script>
@@ -740,6 +755,63 @@ window.addEventListener('DOMContentLoaded', async () => {
 // page source, since a downloaded HTML file has no way to keep a secret.
 function adaptBackendPuzzle(data) {
   return { width: data.grid_w, height: data.grid_h, cells: data.grid, placed: data.placed };
+}
+
+const COLD_START_TOPICS_LOCAL = [
+  'national parks', 'classic rock bands', 'ancient Rome', 'coffee and tea',
+  'board games', 'world capitals', 'jazz music', 'dinosaurs',
+];
+
+function renderTopicChips(topics) {
+  const container = document.getElementById('topic-suggestions');
+  container.innerHTML = '';
+  topics.forEach(topic => {
+    const chip = document.createElement('button');
+    chip.className = 'topic-chip';
+    chip.textContent = topic;
+    chip.onclick = () => {
+      document.getElementById('topic-input').value = topic;
+    };
+    container.appendChild(chip);
+  });
+}
+
+async function suggestTopics() {
+  const statusEl = document.getElementById('custom-status');
+
+  if (!authToken) {
+    // Not logged in -- personalized suggestions need login, but still
+    // offer something useful rather than just blocking the feature.
+    renderTopicChips(COLD_START_TOPICS_LOCAL.slice(0, 5));
+    statusEl.textContent = 'Here are some starter ideas. Log in for suggestions based on your own play history.';
+    return;
+  }
+  if (!backendAvailable) {
+    renderTopicChips(COLD_START_TOPICS_LOCAL.slice(0, 5));
+    statusEl.textContent = '⚠ Backend not connected -- showing generic starter topics instead.';
+    return;
+  }
+
+  statusEl.textContent = 'Thinking of topics you might like...';
+  try {
+    const res = await fetch(`${API_BASE_URL}/recommend_topics`, {
+      headers: { 'Authorization': `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.status === 401) {
+      doLogout();
+      throw new Error('session expired -- please log in again');
+    }
+    if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+    const data = await res.json();
+    renderTopicChips(data.suggested_topics);
+    statusEl.textContent = data.based_on_history
+      ? `Suggested based on ${data.topics_considered} topic(s) you've played.`
+      : 'You haven\'t played anything yet, so here are some starter ideas.';
+  } catch (err) {
+    renderTopicChips(COLD_START_TOPICS_LOCAL.slice(0, 5));
+    statusEl.textContent = 'Error fetching suggestions, showing starter topics instead: ' + err.message;
+  }
 }
 
 async function recommendDifficulty() {
