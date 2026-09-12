@@ -38,9 +38,13 @@ def _extract_year(text: str) -> str | None:
 def _content_word_overlap(norm_a: str, norm_b: str) -> float:
     """Fraction of the smaller clue's meaningful (non-stopword) words that
     also appear in the other clue -- catches reworded-but-same-fact clues
-    that character-level diffing can miss."""
-    words_a = {w for w in norm_a.split() if w not in _STOPWORDS and len(w) > 2}
-    words_b = {w for w in norm_b.split() if w not in _STOPWORDS and len(w) > 2}
+    that character-level diffing can miss. Strips a trailing 's' for a
+    crude singular/plural match (e.g. "island" / "islands")."""
+    def stem(w):
+        return w[:-1] if w.endswith("s") and len(w) > 3 else w
+
+    words_a = {stem(w) for w in norm_a.split() if w not in _STOPWORDS and len(w) > 2}
+    words_b = {stem(w) for w in norm_b.split() if w not in _STOPWORDS and len(w) > 2}
     if not words_a or not words_b:
         return 0.0
     overlap = len(words_a & words_b)
@@ -64,7 +68,7 @@ def _clues_overlap(clue_a: str, clue_b: str) -> bool:
     #   - same year mentioned + meaningfully overlapping vocabulary
     #   - no year info available, but heavy shared vocabulary regardless
     #     (catches cases where neither clue happens to state a year)
-    if same_year and word_overlap >= 0.5:
+    if same_year and word_overlap >= 0.35:
         return True
     if word_overlap >= 0.7:
         return True
