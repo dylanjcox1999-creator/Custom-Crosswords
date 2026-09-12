@@ -655,10 +655,19 @@ function renderPuzzle(containerId, puzzle, topic) {
       const line = document.createElement('div');
       line.className = 'clue-line';
       const text = document.createElement('div');
-      text.innerHTML = `<b>${p.num}.</b> ${p.clue}`;
+      text.innerHTML = `<b>${p.num}.</b> <span class="clue-body">${p.clue}</span>`;
+      const btnGroup = document.createElement('div');
+      btnGroup.style.display = 'flex';
+      btnGroup.style.gap = '4px';
+
       const hintBtn = document.createElement('button');
       hintBtn.className = 'hint-btn';
       hintBtn.textContent = 'Hint';
+      const simplifyBtn = document.createElement('button');
+      simplifyBtn.className = 'hint-btn';
+      simplifyBtn.style.background = 'var(--navy)';
+      simplifyBtn.textContent = '🔍 Simplify';
+
       const hintTextEl = document.createElement('div');
       hintTextEl.className = 'hint-text';
       hintTextEl.style.display = 'none';
@@ -690,8 +699,62 @@ function renderPuzzle(containerId, puzzle, topic) {
         }
       };
 
+      let showingSimplified = false;
+      let simplifiedText = null;
+      const clueBodyEl = text.querySelector('.clue-body');
+      simplifyBtn.onclick = async () => {
+        if (showingSimplified) {
+          // toggle back to the original wording
+          clueBodyEl.textContent = p.clue;
+          simplifyBtn.textContent = '🔍 Simplify';
+          showingSimplified = false;
+          return;
+        }
+        if (simplifiedText) {
+          clueBodyEl.textContent = simplifiedText;
+          simplifyBtn.textContent = '↩ Original wording';
+          showingSimplified = true;
+          return;
+        }
+        if (!backendAvailable) {
+          hintTextEl.style.display = 'block';
+          hintTextEl.textContent = '⚠ Simplifying a clue needs the backend running -- no local fallback for this one (it genuinely needs Claude to rephrase).';
+          return;
+        }
+        simplifyBtn.disabled = true;
+        simplifyBtn.textContent = 'Simplifying...';
+        try {
+          const res = await fetch(`${API_BASE_URL}/simplify_clue`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ word: p.word, clue: p.clue }),
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+          const data = await res.json();
+          simplifiedText = data.simplified;
+          if (data.changed) {
+            clueBodyEl.textContent = simplifiedText;
+            simplifyBtn.textContent = '↩ Original wording';
+            showingSimplified = true;
+          } else {
+            simplifyBtn.textContent = '🔍 Simplify';
+            hintTextEl.style.display = 'block';
+            hintTextEl.textContent = 'This clue didn\'t need simplifying.';
+          }
+        } catch (err) {
+          simplifyBtn.textContent = '🔍 Simplify';
+          hintTextEl.style.display = 'block';
+          hintTextEl.textContent = '⚠ Could not simplify this clue right now: ' + err.message;
+        } finally {
+          simplifyBtn.disabled = false;
+        }
+      };
+
+      btnGroup.appendChild(hintBtn);
+      btnGroup.appendChild(simplifyBtn);
       line.appendChild(text);
-      line.appendChild(hintBtn);
+      line.appendChild(btnGroup);
       col.appendChild(line);
       col.appendChild(hintTextEl);
     });

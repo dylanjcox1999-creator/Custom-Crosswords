@@ -31,6 +31,7 @@ from claude_wordbank import generate_word_bank
 from historical_events import get_events_for_date
 from hints import get_hint, VALID_TIERS
 from topic_recommender import recommend_topics
+from clue_simplifier import simplify_clue
 import auth
 import database
 from database import get_db, User, SolveRecord
@@ -63,6 +64,11 @@ class HintRequest(BaseModel):
     clue: str
     hint: str = ""
     tier: int
+
+
+class SimplifyRequest(BaseModel):
+    word: str
+    clue: str
 
 
 class SolveSubmission(BaseModel):
@@ -221,6 +227,16 @@ def hint(req: HintRequest):
     if req.tier not in VALID_TIERS:
         raise HTTPException(status_code=400, detail=f"tier must be one of {VALID_TIERS}")
     return get_hint(req.word, req.clue, req.hint, req.tier)
+
+
+@app.post("/simplify_clue")
+def simplify(req: SimplifyRequest):
+    """Rephrases a clue to remove assumed cultural/slang knowledge, without
+    changing how hard the puzzle is to solve. No login required, same as
+    /hint -- see clue_simplifier.py for the accessibility rationale."""
+    if not req.word or not req.clue:
+        raise HTTPException(status_code=400, detail="word and clue are both required.")
+    return simplify_clue(req.word, req.clue)
 
 
 # ---------------- Progress tracking (login required) ----------------
