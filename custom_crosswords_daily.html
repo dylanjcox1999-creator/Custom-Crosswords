@@ -663,10 +663,10 @@ function renderPuzzle(containerId, puzzle, topic) {
       const hintBtn = document.createElement('button');
       hintBtn.className = 'hint-btn';
       hintBtn.textContent = 'Hint';
-      const simplifyBtn = document.createElement('button');
-      simplifyBtn.className = 'hint-btn';
-      simplifyBtn.style.background = 'var(--navy)';
-      simplifyBtn.textContent = '🔍 Simplify';
+      const rewordBtn = document.createElement('button');
+      rewordBtn.className = 'hint-btn';
+      rewordBtn.style.background = 'var(--navy)';
+      rewordBtn.textContent = '🔄 Reword';
 
       const hintTextEl = document.createElement('div');
       hintTextEl.className = 'hint-text';
@@ -699,32 +699,32 @@ function renderPuzzle(containerId, puzzle, topic) {
         }
       };
 
-      let showingSimplified = false;
-      let simplifiedText = null;
+      let showingReworded = false;
+      let rewordedText = null;
       const clueBodyEl = text.querySelector('.clue-body');
-      simplifyBtn.onclick = async () => {
-        if (showingSimplified) {
+      rewordBtn.onclick = async () => {
+        if (showingReworded) {
           // toggle back to the original wording
           clueBodyEl.textContent = p.clue;
-          simplifyBtn.textContent = '🔍 Simplify';
-          showingSimplified = false;
+          rewordBtn.textContent = '🔄 Reword';
+          showingReworded = false;
           return;
         }
-        if (simplifiedText) {
-          clueBodyEl.textContent = simplifiedText;
-          simplifyBtn.textContent = '↩ Original wording';
-          showingSimplified = true;
+        if (rewordedText) {
+          clueBodyEl.textContent = rewordedText;
+          rewordBtn.textContent = '↩ Original wording';
+          showingReworded = true;
           return;
         }
         if (!backendAvailable) {
           hintTextEl.style.display = 'block';
-          hintTextEl.textContent = '⚠ Simplifying a clue needs the backend running -- no local fallback for this one (it genuinely needs Claude to rephrase).';
+          hintTextEl.textContent = '⚠ Rewording a clue needs the backend running -- no local fallback for this one (it genuinely needs Claude to rephrase).';
           return;
         }
-        simplifyBtn.disabled = true;
-        simplifyBtn.textContent = 'Simplifying...';
+        rewordBtn.disabled = true;
+        rewordBtn.textContent = 'Rewording...';
         try {
-          const res = await fetch(`${API_BASE_URL}/simplify_clue`, {
+          const res = await fetch(`${API_BASE_URL}/reword_clue`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ word: p.word, clue: p.clue }),
@@ -732,27 +732,27 @@ function renderPuzzle(containerId, puzzle, topic) {
           });
           if (!res.ok) throw new Error(`Backend returned ${res.status}`);
           const data = await res.json();
-          simplifiedText = data.simplified;
+          rewordedText = data.reworded;
           if (data.changed) {
-            clueBodyEl.textContent = simplifiedText;
-            simplifyBtn.textContent = '↩ Original wording';
-            showingSimplified = true;
+            clueBodyEl.textContent = rewordedText;
+            rewordBtn.textContent = '↩ Original wording';
+            showingReworded = true;
           } else {
-            simplifyBtn.textContent = '🔍 Simplify';
+            rewordBtn.textContent = '🔄 Reword';
             hintTextEl.style.display = 'block';
-            hintTextEl.textContent = 'This clue didn\'t need simplifying.';
+            hintTextEl.textContent = 'No alternate phrasing available for this clue right now.';
           }
         } catch (err) {
-          simplifyBtn.textContent = '🔍 Simplify';
+          rewordBtn.textContent = '🔄 Reword';
           hintTextEl.style.display = 'block';
-          hintTextEl.textContent = '⚠ Could not simplify this clue right now: ' + err.message;
+          hintTextEl.textContent = '⚠ Could not reword this clue right now: ' + err.message;
         } finally {
-          simplifyBtn.disabled = false;
+          rewordBtn.disabled = false;
         }
       };
 
       btnGroup.appendChild(hintBtn);
-      btnGroup.appendChild(simplifyBtn);
+      btnGroup.appendChild(rewordBtn);
       line.appendChild(text);
       line.appendChild(btnGroup);
       col.appendChild(line);
