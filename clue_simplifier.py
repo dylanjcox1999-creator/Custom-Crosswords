@@ -30,13 +30,14 @@ SIMPLIFY_PROMPT = """Here is a crossword clue and its answer:
 Clue: "{clue}"
 Answer: {word}
 
-Rewrite this clue to be more accessible -- remove or explain any assumed cultural references, era-specific slang, celebrity nicknames, or niche terminology that a player unfamiliar with them might get stuck on.
+Rewrite this clue in plainer, more universally accessible language -- assume the player may not recognize specific cultural references, era-specific slang, celebrity nicknames, or niche terminology, even ones that seem common to you. Replace them with more widely understood phrasing or add brief context.
 
-STRICT REQUIREMENTS:
-- The rewritten clue must require the SAME amount of knowledge/reasoning to solve as the original -- do not make it easier or more revealing than the original
-- Do not include the answer word (or an obvious variant of it) in the clue
-- Keep it a single, natural sentence, similar in length to the original
-- If the original clue has no jargon or cultural assumption that needs removing, return it unchanged
+You must produce a genuinely different rewrite, not the original clue restated. Do not simply return the input unchanged -- there is almost always a way to phrase something more plainly, even if it's a small change.
+
+Requirements the rewrite must still follow:
+- Requires the SAME amount of knowledge/reasoning to solve as the original -- do not make it easier or more revealing
+- Does not include the answer word (or an obvious variant of it)
+- A single, natural sentence, roughly similar length to the original
 
 Return ONLY the rewritten clue text, nothing else -- no quotes, no explanation, no JSON."""
 
