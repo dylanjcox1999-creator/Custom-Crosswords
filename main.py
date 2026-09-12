@@ -61,8 +61,6 @@ class TopicRequest(BaseModel):
 
 class HintRequest(BaseModel):
     word: str
-    clue: str
-    hint: str = ""
     tier: int
 
 
@@ -110,11 +108,10 @@ def get_current_user(
     return user
 
 
-def build_puzzle_response(entries, hints=None, seed_base=1):
+def build_puzzle_response(entries, seed_base=1):
     """Runs a list of (WORD, clue) tuples through the real compaction-search
     generator and returns the same JSON shape used across the whole book
-    pipeline: {grid_w, grid_h, grid, placed}, with each placed word also
-    carrying its "hint" field merged in from the side-channel `hints` dict."""
+    pipeline: {grid_w, grid_h, grid, placed}."""
     gen = compact_search(entries, seed_base, tries_per_seed=25, n_seeds=20)
     if gen is None:
         raise HTTPException(
@@ -123,18 +120,11 @@ def build_puzzle_response(entries, hints=None, seed_base=1):
                    "(words may not share enough letters to interlock). Try a "
                    "broader topic or fewer words.",
         )
-    hints = hints or {}
-    placed = []
-    for p in gen.placed:
-        p = dict(p)
-        p["hint"] = hints.get(p["word"], p["clue"])
-        placed.append(p)
-
     return {
         "grid_w": gen.n_cols,
         "grid_h": gen.n_rows,
         "grid": {f"{r},{c}": ch for (r, c), ch in gen.grid.items()},
-        "placed": placed,
+        "placed": gen.placed,
         "unplaced_words": gen.unplaced,
     }
 
@@ -185,16 +175,16 @@ def generate_puzzle(req: TopicRequest):
         raise HTTPException(status_code=400, detail="num_words must be between 5 and 20.")
 
     try:
-        entries, hints = generate_word_bank(
+        entries = generate_word_bank(
             req.topic.strip(), n_words=req.num_words, difficulty=req.difficulty
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    result = build_puzzle_response(entries, hints=hints, seed_base=abs(hash(req.topic)) % 10000)
+    result = build_puzzle_response(entries, seed_base=abs(hash(req.topic)) % 10000)
     result["topic"] = req.topic
     result["difficulty"] = req.difficulty
-    result["word_bank_used"] = [{"word": w, "clue": c, "hint": hints.get(w, c)} for w, c in entries]
+    result["word_bank_used"] = [{"word": w, "clue": c} for w, c in entries]
     return result
 
 
@@ -216,8 +206,7 @@ def on_this_day(date: Optional[str] = None):
         )
 
     entries = [(evt["word"], evt["clue"]) for evt in events]
-    hints = {evt["word"]: evt.get("hint", evt["clue"]) for evt in events}
-    result = build_puzzle_response(entries, hints=hints, seed_base=target_date.toordinal())
+    result = build_puzzle_response(entries, seed_base=target_date.toordinal())
     result["date"] = target_date.isoformat()
     return result
 
@@ -226,7 +215,7 @@ def on_this_day(date: Optional[str] = None):
 def hint(req: HintRequest):
     if req.tier not in VALID_TIERS:
         raise HTTPException(status_code=400, detail=f"tier must be one of {VALID_TIERS}")
-    return get_hint(req.word, req.clue, req.hint, req.tier)
+    return get_hint(req.word, req.tier)
 
 
 @app.post("/reword_clue")

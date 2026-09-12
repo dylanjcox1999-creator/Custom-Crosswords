@@ -353,11 +353,11 @@ async function checkBackendHealth() {
   indicator.className = 'backend-status offline';
 }
 
-async function fetchHintFromBackend(word, clue, hint, tier) {
+async function fetchHintFromBackend(word, tier) {
   const res = await fetch(`${API_BASE_URL}/hint`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ word, clue, hint, tier }),
+    body: JSON.stringify({ word, tier }),
     signal: AbortSignal.timeout(3000),
   });
   if (!res.ok) throw new Error(`Backend returned ${res.status}`);
@@ -391,22 +391,24 @@ async function submitSolveToBackend(topic, solveTimeSeconds, hintsUsed, complete
 
 // ---------- On This Day seed data (verified via search, not AI-generated) ----------
 const OTD_WORDS = [
-  {word: "JAMESTOWN", clue: "First permanent English settlement, where John Smith became council president on this day in 1608", hint: "Where John Smith became council president in 1608"},
-  {word: "PERRY", clue: "Oliver Hazard ___, U.S. Captain who won the Battle of Lake Erie on this day in 1813", hint: "The U.S. Captain's last name from the Battle of Lake Erie"},
-  {word: "HOWE", clue: "Elias ___, who patented the sewing machine on this day in 1846", hint: "The last name of the sewing machine's patent holder"},
-  {word: "CANADA", clue: "Country that declared war on Nazi Germany on this day in 1939", hint: "North American country that joined WWII on this date"},
-  {word: "PERSHING", clue: "General John J. ___, whose troops were welcomed home to NYC on this day in 1919", hint: "The general whose WWI troops came home to a NYC welcome"},
-  {word: "QUISLING", clue: "Vidkun ___, sentenced to death for Nazi collaboration on this day in 1945", hint: "A name that later became a word meaning \"traitor\""},
-  {word: "VIRGINIA", clue: "Colony where Jamestown was founded", hint: "The U.S. state that was home to the first English colony"},
-  {word: "PATENT", clue: "Legal protection Elias Howe received for his invention", hint: "What an inventor gets to protect their new idea"},
-  {word: "SOLDIERS", clue: "25,000 of these were welcomed home to New York City in 1919", hint: "Who NYC welcomed home by the thousands after WWI"}
+  {word: "JAMESTOWN", clue: "First permanent English settlement, where John Smith became council president on this day in 1608"},
+  {word: "PERRY", clue: "Oliver Hazard ___, U.S. Captain who won the Battle of Lake Erie on this day in 1813"},
+  {word: "HOWE", clue: "Elias ___, who patented the sewing machine on this day in 1846"},
+  {word: "CANADA", clue: "Country that declared war on Nazi Germany on this day in 1939"},
+  {word: "PERSHING", clue: "General John J. ___, whose troops were welcomed home to NYC on this day in 1919"},
+  {word: "QUISLING", clue: "Vidkun ___, sentenced to death for Nazi collaboration on this day in 1945"},
+  {word: "VIRGINIA", clue: "Colony where Jamestown was founded"},
+  {word: "PATENT", clue: "Legal protection Elias Howe received for his invention"},
+  {word: "SOLDIERS", clue: "25,000 of these were welcomed home to New York City in 1919"}
 ];
 
 // ---------- Three-tier hint system (local fallback -- mirrors backend hints.py exactly) ----------
-function getHintLocal(word, clue, softHint, tier) {
+// Tier 1: first letter only. Tier 2: first + last letter (cumulative). Tier 3: full reveal.
+// Purely letter-based, deliberately not clue-rephrasing based -- that's the separate Reword feature.
+function getHintLocal(word, tier) {
   word = word.toUpperCase().trim();
-  if (tier === 1) return { tier: 1, text: softHint || clue, isReveal: false };
-  if (tier === 2) return { tier: 2, text: `Starts with "${word[0]}" — ${word.length} letters`, isReveal: false };
+  if (tier === 1) return { tier: 1, text: `Starts with "${word[0]}"`, isReveal: false };
+  if (tier === 2) return { tier: 2, text: `Starts with "${word[0]}", ends with "${word[word.length - 1]}"`, isReveal: false };
   return { tier: 3, text: word, isReveal: true };
 }
 
@@ -433,22 +435,21 @@ function buildCrossword(entries) {
     return true;
   }
 
-  function place(word, row, col, dir, clue, hint) {
+  function place(word, row, col, dir, clue) {
     for (let i = 0; i < word.length; i++) {
       let r = dir === 'D' ? row + i : row;
       let c = dir === 'A' ? col + i : col;
       cells[r + "," + c] = word[i];
     }
-    placed.push({word, row, col, dir, clue, hint});
+    placed.push({word, row, col, dir, clue});
   }
 
   // place first (longest) word horizontally at origin
-  place(entries[0].word, 0, 0, 'A', entries[0].clue, entries[0].hint);
+  place(entries[0].word, 0, 0, 'A', entries[0].clue);
 
   for (let i = 1; i < entries.length; i++) {
     let word = entries[i].word;
     let clue = entries[i].clue;
-    let hint = entries[i].hint;
     let candidates = [];
     for (let li = 0; li < word.length; li++) {
       let letter = word[li];
@@ -471,7 +472,7 @@ function buildCrossword(entries) {
       // prefer the candidate closest to the grid center (0,0) for compactness
       candidates.sort((a, b) => (Math.abs(a.row) + Math.abs(a.col)) - (Math.abs(b.row) + Math.abs(b.col)));
       let c = candidates[0];
-      place(word, c.row, c.col, c.dir, clue, hint);
+      place(word, c.row, c.col, c.dir, clue);
     }
     // if no valid intersection found, word is skipped in this simplified demo engine
   }
@@ -680,13 +681,13 @@ function renderPuzzle(containerId, puzzle, topic) {
         let h;
         if (backendAvailable) {
           try {
-            h = await fetchHintFromBackend(p.word, p.clue, p.hint || p.clue, tierToUse);
+            h = await fetchHintFromBackend(p.word, tierToUse);
           } catch (e) {
-            h = getHintLocal(p.word, p.clue, p.hint || p.clue, tierToUse);
+            h = getHintLocal(p.word, tierToUse);
             h.text += ' (local fallback -- backend call failed)';
           }
         } else {
-          h = getHintLocal(p.word, p.clue, p.hint || p.clue, tierToUse);
+          h = getHintLocal(p.word, tierToUse);
         }
         hintsUsedCount += 1;
         hintTextEl.style.display = 'block';

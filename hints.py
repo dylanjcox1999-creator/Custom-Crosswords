@@ -1,36 +1,48 @@
 """
 Three-tier hint system.
 
-Tier 1 (soft):    a more direct, rephrased version of the clue
-Tier 2 (letters): first letter + word length, no semantic help
+Tier 1 (letters): first letter only
+Tier 2 (letters): first letter + last letter (cumulative -- builds on tier 1
+                   rather than replacing it, so a player who already used
+                   tier 1 doesn't lose that information)
 Tier 3 (reveal):  the full answer
 
-Design intent: this replaces the "pay coins to see your mistake" pattern
-that was the single most-complained-about issue in the competitor research
-this product is responding to. Tier 1 and 2 should be free or near-free;
-Tier 3 is the only one that "costs" anything meaningful, and even that is
-a choice the player makes, not a paywall blocking them mid-puzzle.
+Rebuilt from an earlier version where tier 1 was a softer, rephrased
+version of the clue -- that overlapped too much in function with the
+separate "Reword" feature (clue_rewriter.py), which also rephrases the
+clue. This version keeps hints purely letter-based, with zero dependency
+on clue text or an LLM call -- entirely deterministic, entirely free to
+compute, no API cost per hint.
+
+Design intent (unchanged from the original version): this replaces the
+"pay coins to see your mistake" pattern that was the single
+most-complained-about issue in the competitor research this product is
+responding to. Tier 1 and 2 should be free or near-free; Tier 3 is the
+only one that "costs" anything meaningful, and even that is a choice the
+player makes, not a paywall blocking them mid-puzzle.
 """
 
 VALID_TIERS = (1, 2, 3)
 
 
-def get_hint(word: str, clue: str, soft_hint: str, tier: int) -> dict:
+def get_hint(word: str, tier: int) -> dict:
     """
     Returns {"tier": int, "text": str, "is_reveal": bool} for the requested
-    hint tier. Raises ValueError for an invalid tier.
+    hint tier. Raises ValueError for an invalid tier or an empty word.
     """
     word = word.upper().strip()
+    if not word:
+        raise ValueError("word cannot be empty")
     if tier not in VALID_TIERS:
         raise ValueError(f"tier must be one of {VALID_TIERS}, got {tier}")
 
     if tier == 1:
-        return {"tier": 1, "text": soft_hint or clue, "is_reveal": False}
+        return {"tier": 1, "text": f"Starts with \"{word[0]}\"", "is_reveal": False}
 
     if tier == 2:
         return {
             "tier": 2,
-            "text": f"Starts with \"{word[0]}\" — {len(word)} letters",
+            "text": f"Starts with \"{word[0]}\", ends with \"{word[-1]}\"",
             "is_reveal": False,
         }
 

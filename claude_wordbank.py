@@ -22,10 +22,6 @@ exactly {n} objects. Each object must have:
     punctuation), between 4 and 12 letters long
   - "clue": a concise, accurate, one-sentence crossword-style clue. The clue
     must NOT contain the word itself or an obvious root of it.
-  - "hint": a SOFTER, more general version of the clue for a player who is
-    stuck -- point them toward the answer more directly than "clue" does,
-    without simply restating the word. This is shown as a "help" step before
-    the player gives up and reveals the answer outright.
 
 Difficulty guidance for "{difficulty}":
 {difficulty_guidance}
@@ -58,12 +54,10 @@ DIFFICULTY_GUIDANCE = {
 VALID_DIFFICULTIES = ("easy", "medium", "hard")
 
 
-def generate_word_bank(topic: str, n_words: int = 13, difficulty: str = "medium"):
+def generate_word_bank(topic: str, n_words: int = 13, difficulty: str = "medium") -> list[tuple[str, str]]:
     """
     Calls Claude to generate a word bank for `topic` at the given `difficulty`.
-    Returns (entries, hints) where:
-      entries -- list of (WORD, clue) tuples, ready for the crossword generator
-      hints   -- dict {WORD: hint_text} for the tiered hint system
+    Returns a list of (WORD, clue) tuples, ready for the crossword generator.
     Raises ValueError if `difficulty` is invalid or Claude's response can't be
     parsed as valid entries.
     """
@@ -76,7 +70,7 @@ def generate_word_bank(topic: str, n_words: int = 13, difficulty: str = "medium"
     )
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=1800,
+        max_tokens=1500,
         messages=[{"role": "user", "content": prompt}],
     )
     raw_text = "".join(block.text for block in response.content if hasattr(block, "text"))
@@ -88,12 +82,10 @@ def generate_word_bank(topic: str, n_words: int = 13, difficulty: str = "medium"
         raise ValueError(f"Claude did not return valid JSON: {e}\nRaw response: {raw_text[:500]}")
 
     cleaned = []
-    hints = {}
     seen_words = set()
     for item in items:
         word = re.sub(r"[^A-Z]", "", str(item.get("word", "")).upper())
         clue = str(item.get("clue", "")).strip()
-        hint = str(item.get("hint", "")).strip()
         if not word or not clue:
             continue
         if word in seen_words:
@@ -102,12 +94,10 @@ def generate_word_bank(topic: str, n_words: int = 13, difficulty: str = "medium"
             continue
         seen_words.add(word)
         cleaned.append((word, clue))
-        hints[word] = hint if hint else clue  # fall back to the clue if Claude omitted a hint
 
     # Safety net: drop any entry whose clue overlaps too much with one
     # already kept (e.g. two words both clued from basically the same fact).
     cleaned = dedupe_overlapping_clues(cleaned)
-    hints = {w: h for w, h in hints.items() if w in {c[0] for c in cleaned}}
 
     if len(cleaned) < 5:
         raise ValueError(
@@ -115,4 +105,4 @@ def generate_word_bank(topic: str, n_words: int = 13, difficulty: str = "medium"
             f"(need at least 5 to build a reasonable grid). Raw response: {raw_text[:500]}"
         )
 
-    return cleaned, hints
+    return cleaned
