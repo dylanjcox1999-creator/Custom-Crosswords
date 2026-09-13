@@ -16,6 +16,8 @@ Run locally:
   export DATABASE_URL=postgresql://...   (see README -- required for real persistence)
   uvicorn main:app --reload
 """
+import os
+import hmac
 import datetime
 from typing import Optional
 
@@ -86,6 +88,11 @@ class SignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class SetTierRequest(BaseModel):
+    email: str
+    tier: str  # "free" | "paid"
 
 
 def get_current_user(
@@ -188,6 +195,51 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 
     token = auth.create_access_token(user_id=user.id, email=user.email)
     return {"access_token": token, "token_type": "bearer", "email": user.email}
+
+
+# ---------------- Admin (testing only) ----------------
+# Manually flips a user's tier for testing the paid-tier logic before any
+# real billing integration exists. Protected by ADMIN_SECRET_KEY, a
+# separate environment variable from JWT_SECRET_KEY/ANTHROPIC_API_KEY --
+# set it in Render's Environment tab, and send it back as the X-Admin-Key
+# header on this request. If ADMIN_SECRET_KEY isn't set, this endpoint
+# refuses to run at all rather than silently having no protection.
+#
+# IMPORTANT: this is a stand-in for real billing, not a permanent feature.
+# Anyone with the admin key can grant themselves (or anyone) paid access
+# for free -- that's fine while you're the only person testing this, but
+# this endpoint should be removed or replaced with real Stripe webhook
+# handling before this app has real, non-you users.
+
+@app.post("/admin/set_tier")
+def admin_set_tier(
+    req: SetTierRequest,
+    x_admin_key: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    admin_secret = os.environ.get("ADMIN_SECRET_KEY")
+    if not admin_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Admin endpoint not configured -- set ADMIN_SECRET_KEY in your environment.",
+        )
+    # Constant-time comparison -- same reasoning as password verification
+    # in auth.py, avoids leaking timing information about the correct key.
+    if not x_admin_key or not hmac.compare_digest(x_admin_key, admin_secret):
+        raise HTTPException(status_code=403, detail="Invalid or missing X-Admin-Key header.")
+
+    if req.tier not in ("free", "paid"):
+        raise HTTPException(status_code=400, detail="tier must be 'free' or 'paid'.")
+
+    email = req.email.strip().lower()
+    user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"No account found for {email}.")
+
+    user.tier = req.tier
+    db.add(user)
+    db.commit()
+    return {"email": user.email, "tier": user.tier, "updated": True}
 
 
 # ---------------- Puzzles ----------------
