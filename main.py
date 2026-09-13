@@ -274,19 +274,6 @@ FRONTEND_URL = os.environ.get(
 )
 
 
-@app.get("/debug_env_check")
-def debug_env_check():
-    """TEMPORARY debug endpoint -- delete once the Resend env var issue
-    is confirmed fixed. Reports what the live process actually sees,
-    without leaking the secret value itself."""
-    key = os.environ.get("RESEND_API_KEY")
-    return {
-        "resend_api_key_present": key is not None,
-        "resend_api_key_length": len(key) if key else 0,
-        "resend_from_address": os.environ.get("RESEND_FROM_ADDRESS", "(not set)"),
-    }
-
-
 @app.post("/forgot_password")
 def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """Starts a password reset. Always returns the same generic message
@@ -294,11 +281,9 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     error message: don't leak which emails have accounts to someone
     probing this endpoint.
 
-    HONEST LIMITATION: see email_service.py. Without a real email
-    provider configured, the reset link is only printed to the server
-    log, not actually emailed -- this endpoint is not yet a working
-    self-service flow for end users without an admin manually relaying
-    the link."""
+    Sends the reset link via Resend using RESEND_API_KEY /
+    RESEND_FROM_ADDRESS (see email_service.py). Falls back to
+    log-only mode only if RESEND_API_KEY isn't set."""
     email = req.email.strip().lower()
     user = db.query(User).filter(User.email == email).first()
 

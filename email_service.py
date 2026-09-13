@@ -46,12 +46,6 @@ def send_reset_email(to_email: str, reset_link: str) -> bool:
     treated the same as "no provider configured at all."
     """
     api_key = os.environ.get("RESEND_API_KEY")
-    print(
-        f"[DEBUG send_reset_email] pid={os.getpid()} "
-        f"api_key_present={api_key is not None} "
-        f"api_key_len={len(api_key) if api_key else 0} "
-        f"from_address={os.environ.get('RESEND_FROM_ADDRESS', '(not set)')}"
-    )
     if not api_key:
         # Honest fallback: no real email provider configured. Print the
         # link so a developer/admin watching Render's logs can manually
