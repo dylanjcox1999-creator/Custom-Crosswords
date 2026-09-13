@@ -2,34 +2,1345 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="refresh" content="0; url=custom_crosswords_daily.html">
-<title>Topicross</title>
+<title>TopiCross</title>
 <style>
+  :root {
+    --navy: #152A47;
+    --gold: #B08D57;
+    --cream: #F5F1E8;
+    --green: #1F3B2C;
+  }
+  * { box-sizing: border-box; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    background: #F5F1E8;
-    color: #152A47;
+    background: var(--cream);
+    color: #222;
     margin: 0;
-    height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
+    padding: 20px;
+    max-width: 720px;
+    margin: 0 auto;
   }
-  a {
-    color: #B08D57;
+  h1 {
+    color: var(--navy);
+    font-size: 1.5em;
+    text-align: center;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #666;
+    font-size: 0.85em;
+    margin-bottom: 24px;
+  }
+  .section {
+    background: white;
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  .section h2 {
+    color: var(--navy);
+    font-size: 1.1em;
+    margin-top: 0;
+    border-bottom: 2px solid var(--gold);
+    padding-bottom: 8px;
+  }
+  .note {
+    font-size: 0.78em;
+    color: #888;
+    font-style: italic;
+    margin-top: 6px;
+  }
+  .topic-input-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  input[type=text] {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-size: 1em;
+  }
+  button {
+    background: var(--navy);
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 0.95em;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:disabled { background: #999; cursor: default; }
+  button:hover:not(:disabled) { background: #1e3a5f; }
+  .status {
+    font-size: 0.85em;
+    color: var(--navy);
+    min-height: 18px;
+    margin-bottom: 8px;
+  }
+  .grid-wrap {
+    display: flex;
+    justify-content: center;
+    margin: 16px 0;
+    overflow-x: auto;
+  }
+  .grid {
+    display: grid;
+    gap: 1px;
+    background: #333;
+    border: 2px solid #333;
+  }
+  .cell {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    background: white;
+  }
+  .cell.blocked { background: #333; }
+  .cell input {
+    width: 100%;
+    height: 100%;
+    border: none;
+    text-align: center;
+    text-transform: uppercase;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 0;
+    background: transparent;
+  }
+  .cell input:focus { outline: 2px solid var(--gold); outline-offset: -2px; }
+  .cell .num {
+    position: absolute;
+    top: 1px;
+    left: 2px;
+    font-size: 8px;
+    color: #555;
+    pointer-events: none;
+  }
+  .cell.correct input { background: #d9f2d9; }
+  .cell.wrong input { background: #f8d7d7; }
+  .clues {
+    display: flex;
+    gap: 24px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .clue-col { flex: 1; min-width: 200px; }
+  .clue-col h3 {
+    color: var(--gold);
+    font-size: 0.9em;
+    margin-bottom: 6px;
+  }
+  .clue-col div { font-size: 0.82em; margin-bottom: 5px; line-height: 1.3; }
+  .clue-col b { color: var(--navy); }
+  .check-btn { margin-top: 10px; margin-right: 8px; }
+  .timer {
+    font-family: 'SF Mono', Consolas, monospace;
+    font-size: 1.3em;
+    font-weight: 700;
+    color: var(--navy);
+    background: var(--cream);
+    display: inline-block;
+    padding: 6px 14px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    margin-right: 10px;
+  }
+  .backend-status {
+    display: inline-block;
+    font-size: 0.75em;
+    padding: 5px 10px;
+    border-radius: 12px;
     font-weight: 600;
   }
+  .backend-status.connected { background: #d9f2d9; color: #1a6b1a; }
+  .backend-status.offline { background: #f0e2c4; color: #8a6414; }
+  .clue-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .hint-btn {
+    background: var(--gold);
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 0.7em;
+    padding: 3px 8px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .hint-btn:disabled { background: #ccc; cursor: default; }
+  .hint-text {
+    font-size: 0.78em;
+    color: #a5720d;
+    font-style: italic;
+    margin: 2px 0 6px 0;
+  }
+  .topic-chip {
+    background: var(--tan, #f0e6d2);
+    border: 1px solid var(--gold);
+    color: var(--navy);
+    padding: 6px 12px;
+    border-radius: 16px;
+    font-size: 0.85em;
+    cursor: pointer;
+  }
+  .topic-chip:hover { background: var(--gold); color: white; }
 </style>
 </head>
 <body>
-<div>
-  <p>Redirecting to Topicross&hellip;</p>
-  <p><a href="custom_crosswords_daily.html">Tap here if you're not redirected automatically</a></p>
+
+<h1>TopiCross</h1>
+<div class="subtitle">Live prototype — topic-to-puzzle generation + today's real "On This Day" puzzle</div>
+<div style="text-align:center; margin-bottom: 18px;">
+  <span id="backend-indicator" class="backend-status offline">Backend: checking...</span>
 </div>
+
+<div class="section" id="auth-section">
+  <h2>👤 Account</h2>
+  <div id="logged-out-view">
+    <div class="topic-input-row">
+      <input type="text" id="auth-email" placeholder="email" autocomplete="username">
+      <input type="password" id="auth-password" placeholder="password (8+ chars)" autocomplete="current-password">
+    </div>
+    <div class="topic-input-row">
+      <input type="text" id="auth-display-name" placeholder="display name (optional, only used for Sign Up)" autocomplete="nickname">
+    </div>
+    <div style="font-size: 0.82em; margin: 6px 0;">
+      <label>
+        <input type="checkbox" id="agree-to-terms">
+        I agree to the <a href="terms_of_service.html" target="_blank">Terms of Service</a> and <a href="privacy_policy.html" target="_blank">Privacy Policy</a> (required for Sign Up)
+      </label>
+    </div>
+    <div class="topic-input-row">
+      <button onclick="doLogin()">Log In</button>
+      <button onclick="doSignup()" style="background: var(--gold);">Sign Up</button>
+    </div>
+    <div style="margin-top: 8px;">
+      <a href="#" onclick="showForgotPassword(); return false;" style="font-size: 0.85em;">Forgot password?</a>
+    </div>
+    <div id="forgot-password-panel" style="display:none; margin-top: 10px;">
+      <div class="topic-input-row">
+        <input type="text" id="forgot-email" placeholder="your account email">
+        <button onclick="doForgotPassword()">Send Reset Link</button>
+      </div>
+    </div>
+  </div>
+  <div id="logged-in-view" style="display:none;">
+    Logged in as <b id="logged-in-email"></b>.
+    <button onclick="doLogout()" style="margin-left: 8px;">Log Out</button>
+    <div class="topic-input-row" style="margin-top: 8px;">
+      <input type="text" id="new-display-name" placeholder="change display name">
+      <button onclick="doUpdateDisplayName()">Save</button>
+    </div>
+    <div style="margin-top: 14px;">
+      <a href="#" onclick="showDeleteAccount(); return false;" style="font-size: 0.85em; color: #8b1e2f;">Delete my account</a>
+    </div>
+    <div id="delete-account-panel" style="display:none; margin-top: 10px; padding: 10px; background: #f8d7d7; border-radius: 8px;">
+      <div style="font-size: 0.85em; margin-bottom: 6px;">⚠ This permanently deletes your account and all solve history. This cannot be undone. Enter your password to confirm.</div>
+      <div class="topic-input-row">
+        <input type="password" id="delete-account-password" placeholder="confirm password">
+        <button onclick="doDeleteAccount()" style="background: #8b1e2f;">Permanently Delete</button>
+      </div>
+    </div>
+  </div>
+  <div id="auth-status" class="status"></div>
+  <div class="note">Login is only needed to save solve history and get personalized difficulty recommendations. Generating and playing puzzles works without an account.</div>
+  <div class="note">Display name is what's shown instead of your email -- falls back to the part before "@" if you don't set one. Can be changed anytime once logged in.</div>
+</div>
+
+<div class="section" id="reset-password-section" style="display:none;">
+  <h2>🔑 Reset Your Password</h2>
+  <div class="topic-input-row">
+    <input type="password" id="reset-new-password" placeholder="new password (8+ chars)" autocomplete="new-password">
+    <button onclick="doResetPassword()">Set New Password</button>
+  </div>
+  <div id="reset-password-status" class="status"></div>
+</div>
+
+<div class="section">
+  <h2>📊 Stats Dashboard <span style="font-size:0.6em; color: var(--gold);">(paid feature)</span></h2>
+  <button onclick="loadStats()">View My Stats</button>
+  <div id="stats-status" class="status"></div>
+  <div id="stats-content" style="display:none;">
+    <div style="display:flex; flex-wrap:wrap; gap:10px; margin: 12px 0;">
+      <div class="stat-card"><div class="stat-num" id="stat-solved">-</div><div class="stat-label">Solved</div></div>
+      <div class="stat-card"><div class="stat-num" id="stat-current-streak">-</div><div class="stat-label">Current Streak</div></div>
+      <div class="stat-card"><div class="stat-num" id="stat-longest-streak">-</div><div class="stat-label">Longest Streak</div></div>
+      <div class="stat-card"><div class="stat-num" id="stat-completion">-</div><div class="stat-label">Completion Rate</div></div>
+    </div>
+    <div id="stat-fastest" style="font-size:0.85em; margin-bottom:8px;"></div>
+    <div style="font-size:0.85em;"><b>Favorite topics:</b> <span id="stat-topics"></span></div>
+    <div style="font-size:0.85em; margin-top:6px;"><b>By difficulty:</b> <span id="stat-difficulty"></span></div>
+    <div style="font-size:0.85em; margin-top:10px;"><b>Recent activity:</b></div>
+    <div id="stat-recent" style="font-size:0.8em; margin-top:4px;"></div>
+  </div>
+</div>
+
+<style>
+  .stat-card {
+    background: var(--cream, #F5F1E8);
+    border: 1px solid var(--gold);
+    border-radius: 10px;
+    padding: 10px 14px;
+    text-align: center;
+    min-width: 80px;
+  }
+  .stat-num { font-size: 1.4em; font-weight: 700; color: var(--navy); }
+  .stat-label { font-size: 0.7em; color: #666; }
+</style>
+
+<div class="section">
+  <h2 id="otd-title">📅 On This Day</h2>
+  <div id="otd-status" class="status">Ready.</div>
+  <div id="otd-grid-container"></div>
+  <div class="note">Seeded from verified historical events for today's date (Jamestown, Battle of Lake Erie, Elias Howe's sewing machine patent, and more). In production this pulls from a maintained historical-events database each day rather than being hardcoded like this demo.</div>
+</div>
+
+<div class="section">
+  <h2>🧩 Generate a Puzzle From Any Topic</h2>
+  <div class="topic-input-row">
+    <input type="text" id="topic-input" placeholder="e.g. lighthouses, jazz music, houseplants..." value="lighthouses">
+    <button id="generate-btn" onclick="generateCustomPuzzle()">Generate</button>
+  </div>
+  <div class="topic-input-row" style="margin-top: -4px;">
+    <select id="difficulty-select" style="padding: 8px 10px; border-radius: 8px; border: 1px solid #ccc;">
+      <option value="easy">Easy</option>
+      <option value="medium" selected>Medium</option>
+      <option value="hard">Hard</option>
+    </select>
+    <button id="recommend-btn" onclick="recommendDifficulty()" style="background: var(--gold);">Recommend for me</button>
+  </div>
+  <div class="topic-input-row" style="margin-top: -4px;">
+    <button id="suggest-topics-btn" onclick="suggestTopics()" style="background: var(--navy); width: 100%;">✨ Suggest topics for me</button>
+  </div>
+  <div id="topic-suggestions" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
+  <div id="custom-status" class="status">Enter any topic and tap Generate.</div>
+  <div id="custom-grid-container"></div>
+  <div class="note">Calls your backend's <code>/generate_puzzle</code>, which asks Claude for a word bank server-side (your API key never touches the browser) and runs it through your real generator2.py compaction pipeline — not a simplified approximation. Requires the backend to be running.</div>
+  <div class="note">"Recommend for me" calls <code>/recommend_difficulty</code>, personalized to your own solve-time and hint-usage history for this topic (requires login).</div>
+  <div class="note">"Suggest topics for me" calls <code>/recommend_topics</code>, which looks at what you've played before and suggests new, related topics via Claude -- or a diverse starter set if you're new or not logged in.</div>
+</div>
+
 <script>
-  // Backup for the meta-refresh above, in case it's ever blocked or delayed
-  window.location.replace("custom_crosswords_daily.html");
+// ---------- Backend connection ----------
+// Point this at your running `uvicorn main:app` instance (see backend/README.md).
+// Everything below degrades gracefully to local computation if the backend
+// isn't reachable -- this file works standalone either way.
+const API_BASE_URL = 'https://topicross-api.onrender.com';
+let backendAvailable = false;
+
+// ---------- Auth ----------
+// Token persists in localStorage so a logged-in player stays logged in
+// across page reloads, not just within one session.
+let authToken = localStorage.getItem('cc_auth_token') || null;
+let authEmail = localStorage.getItem('cc_auth_email') || null;
+let authDisplayName = localStorage.getItem('cc_auth_display_name') || null;
+
+// ---------- Anonymous trial ID ----------
+// A random ID generated once per browser, stored in localStorage, used to
+// give anonymous visitors 3 free generate_puzzle tries, ONE TIME EVER (not
+// per day) before they need to sign up -- no anonymous access to Reword at all
+// -- deliberately NOT tied to IP address (see backend/usage_limits.py for
+// why). Not personal information -- just a random token this browser
+// happens to carry.
+function getOrCreateAnonymousId() {
+  let id = localStorage.getItem('cc_anon_id');
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem('cc_anon_id', id);
+  }
+  return id;
+}
+const anonymousId = getOrCreateAnonymousId();
+
+function updateAuthUI() {
+  const loggedOut = document.getElementById('logged-out-view');
+  const loggedIn = document.getElementById('logged-in-view');
+  if (authToken) {
+    loggedOut.style.display = 'none';
+    loggedIn.style.display = 'block';
+    document.getElementById('logged-in-email').textContent = authDisplayName || authEmail;
+  } else {
+    loggedOut.style.display = 'block';
+    loggedIn.style.display = 'none';
+  }
+}
+
+function setAuth(token, email, displayName) {
+  authToken = token;
+  authEmail = email;
+  authDisplayName = displayName || email;
+  localStorage.setItem('cc_auth_token', token);
+  localStorage.setItem('cc_auth_email', email);
+  localStorage.setItem('cc_auth_display_name', authDisplayName);
+  updateAuthUI();
+}
+
+function doLogout() {
+  authToken = null;
+  authEmail = null;
+  authDisplayName = null;
+  localStorage.removeItem('cc_auth_token');
+  localStorage.removeItem('cc_auth_email');
+  localStorage.removeItem('cc_auth_display_name');
+  updateAuthUI();
+  document.getElementById('auth-status').textContent = 'Logged out.';
+}
+
+async function doUpdateDisplayName() {
+  const newName = document.getElementById('new-display-name').value.trim();
+  const statusEl = document.getElementById('auth-status');
+  if (!authToken) {
+    statusEl.textContent = 'Not logged in.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t update your name right now.';
+    return;
+  }
+  if (newName.length < 2 || newName.length > 30) {
+    statusEl.textContent = 'Display name must be 2-30 characters.';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/update_display_name`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ display_name: newName }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      doLogout();
+      throw new Error('session expired -- please log in again');
+    }
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+    authDisplayName = data.display_name;
+    localStorage.setItem('cc_auth_display_name', authDisplayName);
+    updateAuthUI();
+    document.getElementById('new-display-name').value = '';
+    statusEl.textContent = `Display name updated to "${authDisplayName}".`;
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
+// ---------- Forgot / reset password ----------
+function showForgotPassword() {
+  document.getElementById('forgot-password-panel').style.display = 'block';
+}
+
+async function doForgotPassword() {
+  const email = document.getElementById('forgot-email').value.trim();
+  const statusEl = document.getElementById('auth-status');
+  if (!email) {
+    statusEl.textContent = 'Enter your account email.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t request a reset right now.';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/forgot_password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+    statusEl.textContent = data.message;
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
+async function doResetPassword() {
+  const newPassword = document.getElementById('reset-new-password').value;
+  const statusEl = document.getElementById('reset-password-status');
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('reset_token');
+  if (!token) {
+    statusEl.textContent = 'No reset token found in the page URL.';
+    return;
+  }
+  if (newPassword.length < 8) {
+    statusEl.textContent = 'Password must be at least 8 characters.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t reset your password right now.';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/reset_password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, new_password: newPassword }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+    statusEl.textContent = data.message + ' Redirecting you to log in...';
+    setTimeout(() => {
+      // strip the token out of the URL and reload into the normal logged-out view
+      window.location.href = window.location.pathname;
+    }, 2500);
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
+// ---------- Delete account ----------
+function showDeleteAccount() {
+  document.getElementById('delete-account-panel').style.display = 'block';
+}
+
+async function doDeleteAccount() {
+  const password = document.getElementById('delete-account-password').value;
+  const statusEl = document.getElementById('auth-status');
+  if (!authToken) {
+    statusEl.textContent = 'Not logged in.';
+    return;
+  }
+  if (!password) {
+    statusEl.textContent = 'Enter your password to confirm deletion.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t delete your account right now.';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/delete_account`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ password }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+    doLogout();
+    statusEl.textContent = 'Your account has been permanently deleted.';
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
+async function doSignup() {
+  const displayName = document.getElementById('auth-display-name').value.trim();
+  const agreed = document.getElementById('agree-to-terms').checked;
+  if (!agreed) {
+    document.getElementById('auth-status').textContent =
+      'Please check the box agreeing to the Terms of Service and Privacy Policy to sign up.';
+    return;
+  }
+  await authRequest('/signup', 'Account created and logged in.', displayName || null);
+}
+
+async function doLogin() {
+  await authRequest('/login', 'Logged in.', null);
+}
+
+async function authRequest(path, successMessage, displayName) {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const statusEl = document.getElementById('auth-status');
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t log in right now.';
+    return;
+  }
+  if (!email || !password) {
+    statusEl.textContent = 'Enter both an email and a password.';
+    return;
+  }
+  statusEl.textContent = 'Working...';
+  const body = { email, password };
+  if (displayName) body.display_name = displayName;
+  try {
+    const res = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+    setAuth(data.access_token, data.email, data.display_name);
+    statusEl.textContent = successMessage;
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
+async function checkBackendHealth() {
+  const indicator = document.getElementById('backend-indicator');
+  try {
+    const res = await fetch(`${API_BASE_URL}/health`, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) {
+      backendAvailable = true;
+      indicator.textContent = 'Backend: connected (hints & solve-tracking are live)';
+      indicator.className = 'backend-status connected';
+      return;
+    }
+  } catch (e) {
+    // fall through to offline state
+  }
+  backendAvailable = false;
+  indicator.textContent = 'Backend: not running — using local fallback (see README to start it)';
+  indicator.className = 'backend-status offline';
+}
+
+async function fetchHintFromBackend(word, tier) {
+  const res = await fetch(`${API_BASE_URL}/hint`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ word, tier }),
+    signal: AbortSignal.timeout(3000),
+  });
+  if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+  const data = await res.json();
+  return { tier: data.tier, text: data.text, isReveal: data.is_reveal };
+}
+
+async function submitSolveToBackend(topic, solveTimeSeconds, hintsUsed, completed, difficulty) {
+  if (!authToken) {
+    throw new Error('not logged in -- log in to save solve history and get personalized recommendations');
+  }
+  const res = await fetch(`${API_BASE_URL}/submit_solve`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${authToken}`,
+    },
+    body: JSON.stringify({
+      topic, difficulty: difficulty || 'medium', solve_time_seconds: solveTimeSeconds,
+      hints_used: hintsUsed, completed,
+    }),
+    signal: AbortSignal.timeout(3000),
+  });
+  if (res.status === 401) {
+    doLogout();
+    throw new Error('session expired -- please log in again');
+  }
+  if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+  return await res.json();
+}
+
+// ---------- On This Day seed data (verified via search, not AI-generated) ----------
+const OTD_WORDS = [
+  {word: "JAMESTOWN", clue: "First permanent English settlement, where John Smith became council president on this day in 1608"},
+  {word: "PERRY", clue: "Oliver Hazard ___, U.S. Captain who won the Battle of Lake Erie on this day in 1813"},
+  {word: "HOWE", clue: "Elias ___, who patented the sewing machine on this day in 1846"},
+  {word: "CANADA", clue: "Country that declared war on Nazi Germany on this day in 1939"},
+  {word: "PERSHING", clue: "General John J. ___, whose troops were welcomed home to NYC on this day in 1919"},
+  {word: "QUISLING", clue: "Vidkun ___, sentenced to death for Nazi collaboration on this day in 1945"},
+  {word: "VIRGINIA", clue: "Colony where Jamestown was founded"},
+  {word: "PATENT", clue: "Legal protection Elias Howe received for his invention"},
+  {word: "SOLDIERS", clue: "25,000 of these were welcomed home to New York City in 1919"}
+];
+
+// ---------- Three-tier hint system (local fallback -- mirrors backend hints.py exactly) ----------
+// Tier 1: first letter only. Tier 2: first + last letter (cumulative). Tier 3: full reveal.
+// Purely letter-based, deliberately not clue-rephrasing based -- that's the separate Reword feature.
+function getHintLocal(word, tier) {
+  word = word.toUpperCase().trim();
+  if (tier === 1) return { tier: 1, text: `Starts with "${word[0]}"`, isReveal: false };
+  if (tier === 2) return { tier: 2, text: `Starts with "${word[0]}", ends with "${word[word.length - 1]}"`, isReveal: false };
+  return { tier: 3, text: word, isReveal: true };
+}
+
+// ---------- Simple client-side crossword placement engine ----------
+function buildCrossword(entries) {
+  entries = entries.slice().sort((a, b) => b.word.length - a.word.length);
+  let cells = {}; // "r,c" -> letter
+  let placed = [];
+
+  function canPlace(word, row, col, dir) {
+    for (let i = 0; i < word.length; i++) {
+      let r = dir === 'D' ? row + i : row;
+      let c = dir === 'A' ? col + i : col;
+      let key = r + "," + c;
+      if (cells[key] !== undefined && cells[key] !== word[i]) return false;
+    }
+    // check cells immediately before/after don't collide with other letters
+    let beforeR = dir === 'D' ? row - 1 : row;
+    let beforeC = dir === 'A' ? col - 1 : col;
+    let afterR = dir === 'D' ? row + word.length : row;
+    let afterC = dir === 'A' ? col + word.length : col;
+    if (cells[beforeR + "," + beforeC] !== undefined) return false;
+    if (cells[afterR + "," + afterC] !== undefined) return false;
+    return true;
+  }
+
+  function place(word, row, col, dir, clue) {
+    for (let i = 0; i < word.length; i++) {
+      let r = dir === 'D' ? row + i : row;
+      let c = dir === 'A' ? col + i : col;
+      cells[r + "," + c] = word[i];
+    }
+    placed.push({word, row, col, dir, clue});
+  }
+
+  // place first (longest) word horizontally at origin
+  place(entries[0].word, 0, 0, 'A', entries[0].clue);
+
+  for (let i = 1; i < entries.length; i++) {
+    let word = entries[i].word;
+    let clue = entries[i].clue;
+    let candidates = [];
+    for (let li = 0; li < word.length; li++) {
+      let letter = word[li];
+      for (let key in cells) {
+        if (cells[key] !== letter) continue;
+        let [er, ec] = key.split(',').map(Number);
+        // try placing vertically through this intersection
+        let row = er - li, col = ec;
+        if (canPlace(word, row, col, 'D')) {
+          candidates.push({row, col, dir: 'D'});
+        }
+        // try placing horizontally through this intersection
+        row = er; col = ec - li;
+        if (canPlace(word, row, col, 'A')) {
+          candidates.push({row, col, dir: 'A'});
+        }
+      }
+    }
+    if (candidates.length > 0) {
+      // prefer the candidate closest to the grid center (0,0) for compactness
+      candidates.sort((a, b) => (Math.abs(a.row) + Math.abs(a.col)) - (Math.abs(b.row) + Math.abs(b.col)));
+      let c = candidates[0];
+      place(word, c.row, c.col, c.dir, clue);
+    }
+    // if no valid intersection found, word is skipped in this simplified demo engine
+  }
+
+  // normalize coordinates to be non-negative
+  let minR = Infinity, minC = Infinity, maxR = -Infinity, maxC = -Infinity;
+  for (let key in cells) {
+    let [r, c] = key.split(',').map(Number);
+    minR = Math.min(minR, r); maxR = Math.max(maxR, r);
+    minC = Math.min(minC, c); maxC = Math.max(maxC, c);
+  }
+  let normCells = {};
+  for (let key in cells) {
+    let [r, c] = key.split(',').map(Number);
+    normCells[(r - minR) + "," + (c - minC)] = cells[key];
+  }
+  let normPlaced = placed.map(p => ({
+    ...p, row: p.row - minR, col: p.col - minC
+  }));
+
+  // assign numbers
+  let numMap = {};
+  let counter = 1;
+  let sorted = [...normPlaced].sort((a, b) => (a.row - b.row) || (a.col - b.col));
+  let seen = {};
+  for (let p of sorted) {
+    let key = p.row + "," + p.col;
+    if (!(key in seen)) {
+      seen[key] = counter++;
+    }
+    numMap[key] = seen[key];
+  }
+  // renumber properly in grid reading order (row major) for standard crossword numbering
+  let startCells = new Set();
+  for (let p of normPlaced) {
+    startCells.add(p.row + "," + p.col);
+  }
+  let ordered = Array.from(startCells).map(k => {
+    let [r, c] = k.split(',').map(Number);
+    return {r, c};
+  }).sort((a, b) => (a.r - b.r) || (a.c - b.c));
+  let finalNum = {};
+  ordered.forEach((s, idx) => { finalNum[s.r + "," + s.c] = idx + 1; });
+  normPlaced.forEach(p => { p.num = finalNum[p.row + "," + p.col]; });
+
+  let width = maxC - minC + 1, height = maxR - minR + 1;
+  return {cells: normCells, placed: normPlaced, width, height};
+}
+
+// ---------- Rendering ----------
+function renderPuzzle(containerId, puzzle, topic) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+
+  // ---- Chronometer ----
+  const timerEl = document.createElement('div');
+  timerEl.className = 'timer';
+  timerEl.textContent = '⏱ 00:00';
+  container.appendChild(timerEl);
+
+  const timerState = { seconds: 0, running: false, started: false, intervalId: null, alreadySubmitted: false };
+  function formatTime(s) {
+    const m = Math.floor(s / 60).toString().padStart(2, '0');
+    const sec = (s % 60).toString().padStart(2, '0');
+    return `⏱ ${m}:${sec}`;
+  }
+  function startTimerIfNeeded() {
+    if (timerState.started) return;  // only the first keystroke starts it
+    timerState.started = true;
+    timerState.running = true;
+    timerState.intervalId = setInterval(() => {
+      if (!timerState.running) return;
+      timerState.seconds += 1;
+      timerEl.textContent = formatTime(timerState.seconds);
+    }, 1000);
+  }
+
+  async function stopTimerAndSubmit(hintsUsedCount) {
+    if (timerState.alreadySubmitted) return; // guard against double-fire
+    timerState.alreadySubmitted = true;
+    timerState.running = false;
+    clearInterval(timerState.intervalId);
+    const baseLabel = `Solved! (${hintsUsedCount} hint${hintsUsedCount === 1 ? '' : 's'} used)`;
+    timerEl.textContent = `${formatTime(timerState.seconds)} — ${baseLabel}`;
+
+    if (backendAvailable) {
+      try {
+        const result = await submitSolveToBackend(topic, timerState.seconds, hintsUsedCount, true);
+        timerEl.textContent =
+          `${formatTime(timerState.seconds)} — ${baseLabel} · avg for this topic: ` +
+          `${result.average_solve_time_seconds_this_topic}s over ${result.topic_attempts_logged_this_session} attempt(s)`;
+      } catch (e) {
+        timerEl.textContent = `${formatTime(timerState.seconds)} — ${baseLabel} (solve-log submit failed: ${e.message})`;
+      }
+    }
+  }
+
+  const gridWrap = document.createElement('div');
+  gridWrap.className = 'grid-wrap';
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  grid.style.gridTemplateColumns = `repeat(${puzzle.width}, 30px)`;
+  grid.style.gridTemplateRows = `repeat(${puzzle.height}, 30px)`;
+
+  const numMap = {};
+  puzzle.placed.forEach(p => { numMap[p.row + "," + p.col] = p.num; });
+
+  const inputs = {};
+  let hintsUsedCount = 0;
+
+  function checkFullSolve() {
+    for (let key in inputs) {
+      if (inputs[key].value !== inputs[key].dataset.answer) return false;
+    }
+    return true;
+  }
+
+  for (let r = 0; r < puzzle.height; r++) {
+    for (let c = 0; c < puzzle.width; c++) {
+      const key = r + "," + c;
+      const cellDiv = document.createElement('div');
+      if (puzzle.cells[key] === undefined) {
+        cellDiv.className = 'cell blocked';
+      } else {
+        cellDiv.className = 'cell';
+        if (numMap[key]) {
+          const num = document.createElement('div');
+          num.className = 'num';
+          num.textContent = numMap[key];
+          cellDiv.appendChild(num);
+        }
+        const input = document.createElement('input');
+        input.maxLength = 1;
+        input.dataset.answer = puzzle.cells[key];
+        input.dataset.row = r;
+        input.dataset.col = c;
+        input.addEventListener('input', (e) => {
+          e.target.value = e.target.value.toUpperCase();
+          if (e.target.value) {
+            startTimerIfNeeded();  // first letter placed anywhere in the grid starts the clock
+            const next = inputs[r + "," + (c + 1)];
+            if (next) next.focus();
+          }
+          if (checkFullSolve()) {
+            stopTimerAndSubmit(hintsUsedCount);
+          }
+        });
+        inputs[key] = input;
+        cellDiv.appendChild(input);
+      }
+      grid.appendChild(cellDiv);
+    }
+  }
+  gridWrap.appendChild(grid);
+  container.appendChild(gridWrap);
+
+  const checkBtn = document.createElement('button');
+  checkBtn.className = 'check-btn';
+  checkBtn.textContent = 'Check Answers';
+  checkBtn.onclick = () => {
+    for (let key in inputs) {
+      const inp = inputs[key];
+      const cellDiv = inp.parentElement;
+      cellDiv.classList.remove('correct', 'wrong');
+      if (!inp.value) continue;
+      if (inp.value === inp.dataset.answer) cellDiv.classList.add('correct');
+      else cellDiv.classList.add('wrong');
+    }
+    if (checkFullSolve()) {
+      stopTimerAndSubmit(hintsUsedCount);
+    }
+  };
+  container.appendChild(checkBtn);
+
+  const clues = document.createElement('div');
+  clues.className = 'clues';
+  const across = puzzle.placed.filter(p => p.dir === 'A').sort((a,b) => a.num - b.num);
+  const down = puzzle.placed.filter(p => p.dir === 'D').sort((a,b) => a.num - b.num);
+
+  function clueCol(title, items) {
+    const col = document.createElement('div');
+    col.className = 'clue-col';
+    const h3 = document.createElement('h3');
+    h3.textContent = title;
+    col.appendChild(h3);
+    items.forEach(p => {
+      const line = document.createElement('div');
+      line.className = 'clue-line';
+      const text = document.createElement('div');
+      text.innerHTML = `<b>${p.num}.</b> <span class="clue-body">${p.clue}</span>`;
+      const btnGroup = document.createElement('div');
+      btnGroup.style.display = 'flex';
+      btnGroup.style.gap = '4px';
+
+      const hintBtn = document.createElement('button');
+      hintBtn.className = 'hint-btn';
+      hintBtn.textContent = 'Hint';
+      const rewordBtn = document.createElement('button');
+      rewordBtn.className = 'hint-btn';
+      rewordBtn.style.background = 'var(--navy)';
+      rewordBtn.textContent = '🔄 Reword';
+
+      const hintTextEl = document.createElement('div');
+      hintTextEl.className = 'hint-text';
+      hintTextEl.style.display = 'none';
+
+      let currentTier = 0;
+      hintBtn.onclick = async () => {
+        currentTier += 1;
+        const tierToUse = Math.min(currentTier, 3);
+        hintBtn.disabled = true;
+        let h;
+        if (backendAvailable) {
+          try {
+            h = await fetchHintFromBackend(p.word, tierToUse);
+          } catch (e) {
+            h = getHintLocal(p.word, tierToUse);
+            h.text += ' (local fallback -- backend call failed)';
+          }
+        } else {
+          h = getHintLocal(p.word, tierToUse);
+        }
+        hintsUsedCount += 1;
+        hintTextEl.style.display = 'block';
+        hintTextEl.textContent = `💡 ${h.text}`;
+        if (h.isReveal) {
+          hintBtn.textContent = 'Revealed';
+        } else {
+          hintBtn.disabled = false;
+          hintBtn.textContent = `Hint (tier ${currentTier + 1})`;
+        }
+      };
+
+      let showingReworded = false;
+      let rewordedText = null;
+      const clueBodyEl = text.querySelector('.clue-body');
+      rewordBtn.onclick = async () => {
+        if (showingReworded) {
+          // toggle back to the original wording
+          clueBodyEl.textContent = p.clue;
+          rewordBtn.textContent = '🔄 Reword';
+          showingReworded = false;
+          return;
+        }
+        if (rewordedText) {
+          clueBodyEl.textContent = rewordedText;
+          rewordBtn.textContent = '↩ Original wording';
+          showingReworded = true;
+          return;
+        }
+        if (!backendAvailable) {
+          hintTextEl.style.display = 'block';
+          hintTextEl.textContent = '⚠ Rewording a clue needs the backend running -- no local fallback for this one (it genuinely needs Claude to rephrase).';
+          return;
+        }
+        if (!authToken) {
+          hintTextEl.style.display = 'block';
+          hintTextEl.textContent = '⚠ Log in to use Reword -- unlike Generate, there\'s no anonymous trial for this one. Free accounts get 3 rewords/day.';
+          return;
+        }
+        rewordBtn.disabled = true;
+        rewordBtn.textContent = 'Rewording...';
+        try {
+          const res = await fetch(`${API_BASE_URL}/reword_clue`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ word: p.word, clue: p.clue }),
+            signal: AbortSignal.timeout(8000),
+          });
+          if (res.status === 401) {
+            doLogout();
+            throw new Error('session expired -- please log in again');
+          }
+          if (res.status === 429) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(errBody.detail || 'Daily limit reached.');
+          }
+          if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+          const data = await res.json();
+          rewordedText = data.reworded;
+          if (data.changed) {
+            clueBodyEl.textContent = rewordedText;
+            rewordBtn.textContent = '↩ Original wording';
+            showingReworded = true;
+            if (typeof data.daily_actions_remaining === 'number' && data.daily_actions_remaining >= 0) {
+              hintTextEl.style.display = 'block';
+              hintTextEl.textContent = `${data.daily_actions_remaining} free rewords left today.`;
+            }
+          } else {
+            rewordBtn.textContent = '🔄 Reword';
+            hintTextEl.style.display = 'block';
+            hintTextEl.textContent = 'No alternate phrasing available for this clue right now.';
+          }
+        } catch (err) {
+          rewordBtn.textContent = '🔄 Reword';
+          hintTextEl.style.display = 'block';
+          hintTextEl.textContent = '⚠ Could not reword this clue right now: ' + err.message;
+        } finally {
+          rewordBtn.disabled = false;
+        }
+      };
+
+      btnGroup.appendChild(hintBtn);
+      btnGroup.appendChild(rewordBtn);
+      line.appendChild(text);
+      line.appendChild(btnGroup);
+      col.appendChild(line);
+      col.appendChild(hintTextEl);
+    });
+    return col;
+  }
+  clues.appendChild(clueCol('Across', across));
+  clues.appendChild(clueCol('Down', down));
+  container.appendChild(clues);
+}
+
+// ---------- On This Day puzzle ----------
+// Calls the backend's real /on_this_day endpoint (today's actual date,
+// pulling live Wikipedia data grounded through Claude) with a fallback to
+// the one hardcoded, verified sample if the backend is unreachable or has
+// no data for today yet.
+async function loadOnThisDayPuzzle() {
+  const statusEl = document.getElementById('otd-status');
+  const titleEl = document.getElementById('otd-title');
+
+  if (backendAvailable) {
+    try {
+      statusEl.textContent = 'Loading today\'s real On This Day puzzle...';
+      const res = await fetch(`${API_BASE_URL}/on_this_day`, {
+        signal: AbortSignal.timeout(15000), // first request for a new date can take a few seconds (live Wikipedia + Claude call)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const puzzle = adaptBackendPuzzle(data);
+        renderPuzzle('otd-grid-container', puzzle, 'on_this_day_' + data.date);
+        const niceDate = new Date(data.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+        titleEl.textContent = `📅 On This Day — ${niceDate}`;
+        statusEl.textContent = `Placed ${puzzle.placed.length} of ${data.word_bank_used ? data.word_bank_used.length : puzzle.placed.length} words for ${data.date} (live from your backend).`;
+        return;
+      }
+      // fall through to local fallback on a non-OK response (e.g. no data yet for today)
+    } catch (err) {
+      // fall through to local fallback on any network/timeout error
+    }
+  }
+
+  // Local fallback: the one hardcoded, verified sample (September 10)
+  const puzzle = buildCrossword(OTD_WORDS);
+  renderPuzzle('otd-grid-container', puzzle, 'on_this_day_fallback_sept_10');
+  titleEl.textContent = '📅 On This Day — September 10 (fallback sample)';
+  statusEl.textContent =
+    `Placed ${puzzle.placed.length} of ${OTD_WORDS.length} words. ` +
+    `(Local fallback for September 10 -- backend unavailable or has no data for today yet.)`;
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  updateAuthUI();
+
+  // If this page was opened from a password-reset link, show the reset
+  // panel instead of (well, alongside) the normal account UI.
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('reset_token')) {
+    document.getElementById('reset-password-section').style.display = 'block';
+  }
+
+  await checkBackendHealth();
+  await loadOnThisDayPuzzle();
+});
+
+// ---------- Custom topic generation ----------
+// Routes through your own backend's /generate_puzzle, which holds the
+// Anthropic API key server-side and runs the real generator2.py pipeline.
+// This deliberately does NOT call the Anthropic API directly from the
+// browser -- doing so would expose your API key to anyone who views the
+// page source, since a downloaded HTML file has no way to keep a secret.
+function adaptBackendPuzzle(data) {
+  return { width: data.grid_w, height: data.grid_h, cells: data.grid, placed: data.placed };
+}
+
+const COLD_START_TOPICS_LOCAL = [
+  'national parks', 'classic rock bands', 'ancient Rome', 'coffee and tea',
+  'board games', 'world capitals', 'jazz music', 'dinosaurs',
+];
+
+function renderTopicChips(topics) {
+  const container = document.getElementById('topic-suggestions');
+  container.innerHTML = '';
+  topics.forEach(topic => {
+    const chip = document.createElement('button');
+    chip.className = 'topic-chip';
+    chip.textContent = topic;
+    chip.onclick = () => {
+      document.getElementById('topic-input').value = topic;
+    };
+    container.appendChild(chip);
+  });
+}
+
+async function loadStats() {
+  const statusEl = document.getElementById('stats-status');
+  const contentEl = document.getElementById('stats-content');
+  contentEl.style.display = 'none';
+
+  if (!authToken) {
+    statusEl.textContent = '⚠ Log in to view your stats.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t load stats right now.';
+    return;
+  }
+
+  statusEl.textContent = 'Loading...';
+  try {
+    const res = await fetch(`${API_BASE_URL}/stats`, {
+      headers: { 'Authorization': `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.status === 401) {
+      doLogout();
+      throw new Error('session expired -- please log in again');
+    }
+    if (res.status === 403) {
+      const errBody = await res.json().catch(() => ({}));
+      statusEl.textContent = '🔒 ' + (errBody.detail || 'Stats dashboard is a paid feature.');
+      return;
+    }
+    if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+    const data = await res.json();
+
+    document.getElementById('stat-solved').textContent = `${data.total_solved}/${data.total_attempted}`;
+    document.getElementById('stat-current-streak').textContent = `${data.current_streak_days}d`;
+    document.getElementById('stat-longest-streak').textContent = `${data.longest_streak_days}d`;
+    document.getElementById('stat-completion').textContent = `${Math.round(data.completion_rate * 100)}%`;
+
+    document.getElementById('stat-fastest').textContent = data.fastest_solve
+      ? `⚡ Fastest solve: "${data.fastest_solve.topic}" in ${Math.round(data.fastest_solve.solve_time_seconds)}s`
+      : 'No completed solves yet.';
+
+    document.getElementById('stat-topics').textContent = data.favorite_topics.length
+      ? data.favorite_topics.map(t => `${t.topic} (${t.times_played}x)`).join(', ')
+      : 'None yet.';
+
+    const diffEntries = Object.entries(data.difficulty_breakdown);
+    document.getElementById('stat-difficulty').textContent = diffEntries.length
+      ? diffEntries.map(([d, c]) => `${d}: ${c}`).join(', ')
+      : 'None yet.';
+
+    const recentEl = document.getElementById('stat-recent');
+    recentEl.innerHTML = '';
+    if (data.recent_activity.length === 0) {
+      recentEl.textContent = 'No activity yet -- solve a puzzle to see it here.';
+    } else {
+      data.recent_activity.forEach(a => {
+        const line = document.createElement('div');
+        const when = new Date(a.logged_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const status = a.completed ? '✅' : '⏸';
+        line.textContent = `${status} ${when} — "${a.topic}" (${a.difficulty}), ${Math.round(a.solve_time_seconds)}s, ${a.hints_used} hint(s)`;
+        recentEl.appendChild(line);
+      });
+    }
+
+    contentEl.style.display = 'block';
+    statusEl.textContent = '';
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
+async function suggestTopics() {
+  const statusEl = document.getElementById('custom-status');
+
+  if (!authToken) {
+    // Not logged in -- personalized suggestions need login, but still
+    // offer something useful rather than just blocking the feature.
+    renderTopicChips(COLD_START_TOPICS_LOCAL.slice(0, 5));
+    statusEl.textContent = 'Here are some starter ideas. Log in for suggestions based on your own play history.';
+    return;
+  }
+  if (!backendAvailable) {
+    renderTopicChips(COLD_START_TOPICS_LOCAL.slice(0, 5));
+    statusEl.textContent = '⚠ Backend not connected -- showing generic starter topics instead.';
+    return;
+  }
+
+  statusEl.textContent = 'Thinking of topics you might like...';
+  try {
+    const res = await fetch(`${API_BASE_URL}/recommend_topics`, {
+      headers: { 'Authorization': `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.status === 401) {
+      doLogout();
+      throw new Error('session expired -- please log in again');
+    }
+    if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+    const data = await res.json();
+    renderTopicChips(data.suggested_topics);
+    statusEl.textContent = data.based_on_history
+      ? `Suggested based on ${data.topics_considered} topic(s) you've played.`
+      : 'You haven\'t played anything yet, so here are some starter ideas.';
+  } catch (err) {
+    renderTopicChips(COLD_START_TOPICS_LOCAL.slice(0, 5));
+    statusEl.textContent = 'Error fetching suggestions, showing starter topics instead: ' + err.message;
+  }
+}
+
+async function recommendDifficulty() {
+  const topic = document.getElementById('topic-input').value.trim();
+  const statusEl = document.getElementById('custom-status');
+  if (!topic) {
+    statusEl.textContent = 'Enter a topic first.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t fetch a recommendation.';
+    return;
+  }
+  if (!authToken) {
+    statusEl.textContent = '⚠ Log in first -- recommendations are based on your own solve history.';
+    return;
+  }
+  statusEl.textContent = `Checking your solve history for "${topic}"...`;
+  try {
+    const res = await fetch(`${API_BASE_URL}/recommend_difficulty?topic=${encodeURIComponent(topic)}`, {
+      headers: { 'Authorization': `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.status === 401) {
+      doLogout();
+      throw new Error('session expired -- please log in again');
+    }
+    if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+    const data = await res.json();
+    document.getElementById('difficulty-select').value = data.recommended_difficulty;
+    statusEl.textContent = `Recommended: ${data.recommended_difficulty} (${data.reason})`;
+  } catch (err) {
+    statusEl.textContent = 'Error fetching recommendation: ' + err.message;
+  }
+}
+
+async function generateCustomPuzzle() {
+  const topic = document.getElementById('topic-input').value.trim();
+  const difficulty = document.getElementById('difficulty-select').value;
+  const statusEl = document.getElementById('custom-status');
+  const btn = document.getElementById('generate-btn');
+  if (!topic) {
+    statusEl.textContent = 'Enter a topic first.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent =
+      '⚠ Backend not connected. Custom topic generation needs your backend running ' +
+      '(uvicorn main:app) so your Anthropic API key stays server-side. See backend/README.md.';
+    return;
+  }
+
+  btn.disabled = true;
+  statusEl.textContent = authToken
+    ? `Asking your backend to generate a ${difficulty} puzzle for "${topic}"...`
+    : `Generating your free trial puzzle for "${topic}"...`;
+  document.getElementById('custom-grid-container').innerHTML = '';
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  } else {
+    headers['X-Anonymous-Id'] = anonymousId;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/generate_puzzle`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ topic, num_words: 13, difficulty }),
+      signal: AbortSignal.timeout(30000), // word-bank generation + grid placement can take a few seconds
+    });
+    if (res.status === 401) {
+      doLogout();
+      throw new Error('session expired -- please log in again');
+    }
+    if (res.status === 429) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.detail || 'Daily limit reached.');
+    }
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.detail || `Backend returned ${res.status}`);
+    }
+    const data = await res.json();
+    const puzzle = adaptBackendPuzzle(data);
+    renderPuzzle('custom-grid-container', puzzle, topic);
+    const remainingNote = typeof data.daily_actions_remaining === 'number' && data.daily_actions_remaining >= 0
+      ? authToken
+        ? ` (${data.daily_actions_remaining} free generations left today)`
+        : ` (${data.daily_actions_remaining} free trial generations left, ever)`
+      : '';
+    statusEl.textContent =
+      `Placed ${puzzle.placed.length} of ${data.word_bank_used.length} words for "${topic}" ` +
+      `(${difficulty}, via your real generator2.py engine).${remainingNote}`;
+  } catch (err) {
+    statusEl.textContent = 'Error generating puzzle: ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
 </script>
+
+<div style="text-align:center; padding: 20px 10px; font-size: 0.8em; color: #666;">
+  <a href="privacy_policy.html" target="_blank">Privacy Policy</a>
+  &nbsp;·&nbsp;
+  <a href="terms_of_service.html" target="_blank">Terms of Service</a>
+</div>
+
 </body>
 </html>

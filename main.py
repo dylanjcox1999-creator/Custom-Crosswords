@@ -270,7 +270,7 @@ def update_display_name(
 # if reset links break before DNS finishes propagating).
 FRONTEND_URL = os.environ.get(
     "FRONTEND_URL",
-    "https://topicross.app/custom_crosswords_daily.html",
+    "https://topicross.app/",
 )
 
 
