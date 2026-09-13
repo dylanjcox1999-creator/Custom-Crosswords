@@ -89,9 +89,81 @@ class AnonymousUsage(Base):
 
 
 def init_db():
-    """Creates tables if they don't already exist. Safe to call on every
-    startup -- it's a no-op if the schema is already there."""
+    """Creates tables if they don't already exist, AND adds any columns
+    that exist in the Python models but not yet in the actual database --
+    a lightweight substitute for a real migration tool (Alembic), which
+    would be the correct long-term answer but is more than this project
+    needs right now.
+
+    This matters because Base.metadata.create_all() on its own only
+    creates MISSING TABLES -- it does not alter a table that already
+    exists to add new columns. Every time a column gets added to a model
+    (like `tier` on User) after the table was already created in a real
+    deployed database, every query touching that table breaks until the
+    column is actually added -- this is exactly what caused login to fail
+    with "Failed to fetch" after the paid-tier usage-cap columns were
+    added to User: the code expected them, the live database didn't have
+    them, and the resulting SQL error surfaced as a generic network
+    failure in the browser rather than a clear error message.
+    """
+    from sqlalchemy import inspect, text
+
     Base.metadata.create_all(bind=engine)
+
+    inspector = inspect(engine)
+    for table in Base.metadata.sorted_tables:
+        if not inspector.has_table(table.name):
+            continue  # just created above, nothing to add
+        existing_columns = {col["name"] for col in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in existing_columns:
+                continue
+
+            col_type = column.type.compile(dialect=engine.dialect)
+            ddl = f'ALTER TABLE {table.name} ADD COLUMN {column.name} {col_type}'
+
+            # If the column is NOT NULL, a table with existing rows needs a
+            # database-level DEFAULT to backfill them -- otherwise Postgres
+            # rejects the ALTER outright, since existing rows would have no
+            # value for a new required column.
+            if not column.nullable:
+                default_sql = _literal_default_for_column(column)
+                if default_sql is not None:
+                    ddl += f" NOT NULL DEFAULT {default_sql}"
+                else:
+                    # No safe literal default available -- add it nullable
+                    # rather than fail the whole startup. Application code
+                    # (usage_limits.py) should treat a None value the same
+                    # as "not set yet" for any column added this way.
+                    pass
+
+            with engine.begin() as conn:
+                conn.execute(text(ddl))
+            print(f"Added missing column: {table.name}.{column.name}")
+
+
+def _literal_default_for_column(column):
+    """Returns a SQL literal to use as a DEFAULT when backfilling a newly
+    added NOT NULL column on a table that may already have rows. Only
+    handles the simple, static-value cases this project actually uses --
+    not a general solution for arbitrary defaults."""
+    default = column.default
+    if default is None or not getattr(default, "is_scalar", False):
+        # Dynamic defaults (e.g. lambda: datetime.date.today()) can't be
+        # expressed as a fixed literal -- special-case the ones this
+        # project uses by column name instead.
+        if column.name == "daily_premium_actions_date":
+            return "CURRENT_DATE"
+        return None
+
+    value = default.arg
+    if isinstance(value, str):
+        return f"'{value}'"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return None
 
 
 def get_db():
