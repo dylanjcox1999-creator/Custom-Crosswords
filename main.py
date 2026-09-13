@@ -48,7 +48,14 @@ app = FastAPI(title="Custom Crosswords Daily API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://dylanjcox1999-creator.github.io"],
+    # Allows both the old GitHub Pages origin and the new custom domain
+    # during the DNS transition -- once topicross.app is confirmed fully
+    # live and propagated, the github.io entry can be removed.
+    allow_origins=[
+        "https://dylanjcox1999-creator.github.io",
+        "https://topicross.app",
+        "https://www.topicross.app",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -256,11 +263,14 @@ def update_display_name(
 
 
 # The page a reset-password link points users back to. Configurable via
-# environment variable since this could change if the frontend ever moves
-# off GitHub Pages -- falls back to the current known URL.
+# environment variable -- defaults to the new custom domain now that
+# topicross.app is set up, but keep this overridable in Render's
+# Environment tab in case the domain isn't fully propagated yet when this
+# deploys (set FRONTEND_URL there temporarily back to the github.io URL
+# if reset links break before DNS finishes propagating).
 FRONTEND_URL = os.environ.get(
     "FRONTEND_URL",
-    "https://dylanjcox1999-creator.github.io/Custom-Crosswords/custom_crosswords_daily.html",
+    "https://topicross.app/custom_crosswords_daily.html",
 )
 
 
@@ -289,7 +299,18 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
         db.commit()
 
         reset_link = f"{FRONTEND_URL}?reset_token={raw_token}"
-        send_reset_email(user.email, reset_link)
+        try:
+            send_reset_email(user.email, reset_link)
+        except Exception as e:
+            # A real send can fail (e.g. Resend rejects it with a 403
+            # because no domain is verified and the recipient isn't the
+            # account owner -- see email_service.py). Log it server-side
+            # for whoever's watching, but don't let it 500 the request or
+            # change the generic response below -- that response's whole
+            # point is staying identical whether or not the email exists,
+            # and it shouldn't also leak "the email attempt failed" to
+            # whoever's calling this endpoint.
+            print(f"[forgot_password] send_reset_email failed for {user.email}: {e}")
 
     return {
         "message": "If an account with that email exists, a password reset link has been sent."
