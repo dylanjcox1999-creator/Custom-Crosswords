@@ -38,6 +38,7 @@ from usage_limits import (
     check_and_increment_usage, check_and_increment_reword_usage,
     check_and_increment_anonymous_usage, UsageLimitExceeded,
 )
+from stats import build_stats
 import auth
 import database
 from database import get_db, User, SolveRecord, AnonymousUsage
@@ -539,6 +540,38 @@ def get_recommend_topics(
         "based_on_history": len(history) > 0,
         "topics_considered": len(history),
     }
+
+
+@app.get("/stats")
+def get_stats(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Paid-tier stats dashboard: totals, averages, favorite topics,
+    difficulty breakdown, fastest solve, and solve streaks. See stats.py
+    for the actual computation, kept database-free and fully offline
+    -testable on purpose -- this endpoint just fetches the records and
+    hands them off as plain dicts."""
+    if current_user.tier != "paid":
+        raise HTTPException(
+            status_code=403,
+            detail="The stats dashboard is a paid feature. Upgrade to see your "
+                   "solve history, favorite topics, and streaks.",
+        )
+
+    records = db.query(SolveRecord).filter(SolveRecord.user_id == current_user.id).all()
+    record_dicts = [
+        {
+            "topic": r.topic,
+            "difficulty": r.difficulty,
+            "solve_time_seconds": r.solve_time_seconds,
+            "hints_used": r.hints_used,
+            "completed": r.completed,
+            "logged_at": r.logged_at,
+        }
+        for r in records
+    ]
+    return build_stats(record_dicts)
 
 
 @app.get("/health")

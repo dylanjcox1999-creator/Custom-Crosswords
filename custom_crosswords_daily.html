@@ -231,6 +231,38 @@
 </div>
 
 <div class="section">
+  <h2>📊 Stats Dashboard <span style="font-size:0.6em; color: var(--gold);">(paid feature)</span></h2>
+  <button onclick="loadStats()">View My Stats</button>
+  <div id="stats-status" class="status"></div>
+  <div id="stats-content" style="display:none;">
+    <div style="display:flex; flex-wrap:wrap; gap:10px; margin: 12px 0;">
+      <div class="stat-card"><div class="stat-num" id="stat-solved">-</div><div class="stat-label">Solved</div></div>
+      <div class="stat-card"><div class="stat-num" id="stat-current-streak">-</div><div class="stat-label">Current Streak</div></div>
+      <div class="stat-card"><div class="stat-num" id="stat-longest-streak">-</div><div class="stat-label">Longest Streak</div></div>
+      <div class="stat-card"><div class="stat-num" id="stat-completion">-</div><div class="stat-label">Completion Rate</div></div>
+    </div>
+    <div id="stat-fastest" style="font-size:0.85em; margin-bottom:8px;"></div>
+    <div style="font-size:0.85em;"><b>Favorite topics:</b> <span id="stat-topics"></span></div>
+    <div style="font-size:0.85em; margin-top:6px;"><b>By difficulty:</b> <span id="stat-difficulty"></span></div>
+    <div style="font-size:0.85em; margin-top:10px;"><b>Recent activity:</b></div>
+    <div id="stat-recent" style="font-size:0.8em; margin-top:4px;"></div>
+  </div>
+</div>
+
+<style>
+  .stat-card {
+    background: var(--cream, #F5F1E8);
+    border: 1px solid var(--gold);
+    border-radius: 10px;
+    padding: 10px 14px;
+    text-align: center;
+    min-width: 80px;
+  }
+  .stat-num { font-size: 1.4em; font-weight: 700; color: var(--navy); }
+  .stat-label { font-size: 0.7em; color: #666; }
+</style>
+
+<div class="section">
   <h2 id="otd-title">📅 On This Day</h2>
   <div id="otd-status" class="status">Ready.</div>
   <div id="otd-grid-container"></div>
@@ -932,6 +964,77 @@ function renderTopicChips(topics) {
     };
     container.appendChild(chip);
   });
+}
+
+async function loadStats() {
+  const statusEl = document.getElementById('stats-status');
+  const contentEl = document.getElementById('stats-content');
+  contentEl.style.display = 'none';
+
+  if (!authToken) {
+    statusEl.textContent = '⚠ Log in to view your stats.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t load stats right now.';
+    return;
+  }
+
+  statusEl.textContent = 'Loading...';
+  try {
+    const res = await fetch(`${API_BASE_URL}/stats`, {
+      headers: { 'Authorization': `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.status === 401) {
+      doLogout();
+      throw new Error('session expired -- please log in again');
+    }
+    if (res.status === 403) {
+      const errBody = await res.json().catch(() => ({}));
+      statusEl.textContent = '🔒 ' + (errBody.detail || 'Stats dashboard is a paid feature.');
+      return;
+    }
+    if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+    const data = await res.json();
+
+    document.getElementById('stat-solved').textContent = `${data.total_solved}/${data.total_attempted}`;
+    document.getElementById('stat-current-streak').textContent = `${data.current_streak_days}d`;
+    document.getElementById('stat-longest-streak').textContent = `${data.longest_streak_days}d`;
+    document.getElementById('stat-completion').textContent = `${Math.round(data.completion_rate * 100)}%`;
+
+    document.getElementById('stat-fastest').textContent = data.fastest_solve
+      ? `⚡ Fastest solve: "${data.fastest_solve.topic}" in ${Math.round(data.fastest_solve.solve_time_seconds)}s`
+      : 'No completed solves yet.';
+
+    document.getElementById('stat-topics').textContent = data.favorite_topics.length
+      ? data.favorite_topics.map(t => `${t.topic} (${t.times_played}x)`).join(', ')
+      : 'None yet.';
+
+    const diffEntries = Object.entries(data.difficulty_breakdown);
+    document.getElementById('stat-difficulty').textContent = diffEntries.length
+      ? diffEntries.map(([d, c]) => `${d}: ${c}`).join(', ')
+      : 'None yet.';
+
+    const recentEl = document.getElementById('stat-recent');
+    recentEl.innerHTML = '';
+    if (data.recent_activity.length === 0) {
+      recentEl.textContent = 'No activity yet -- solve a puzzle to see it here.';
+    } else {
+      data.recent_activity.forEach(a => {
+        const line = document.createElement('div');
+        const when = new Date(a.logged_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const status = a.completed ? '✅' : '⏸';
+        line.textContent = `${status} ${when} — "${a.topic}" (${a.difficulty}), ${Math.round(a.solve_time_seconds)}s, ${a.hints_used} hint(s)`;
+        recentEl.appendChild(line);
+      });
+    }
+
+    contentEl.style.display = 'block';
+    statusEl.textContent = '';
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
 }
 
 async function suggestTopics() {
