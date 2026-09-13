@@ -785,17 +785,22 @@ function renderPuzzle(containerId, puzzle, topic) {
   timerEl.textContent = '⏱ 00:00';
   container.appendChild(timerEl);
 
-  const timerState = { seconds: 0, running: true, intervalId: null, alreadySubmitted: false };
+  const timerState = { seconds: 0, running: false, started: false, intervalId: null, alreadySubmitted: false };
   function formatTime(s) {
     const m = Math.floor(s / 60).toString().padStart(2, '0');
     const sec = (s % 60).toString().padStart(2, '0');
     return `⏱ ${m}:${sec}`;
   }
-  timerState.intervalId = setInterval(() => {
-    if (!timerState.running) return;
-    timerState.seconds += 1;
-    timerEl.textContent = formatTime(timerState.seconds);
-  }, 1000);
+  function startTimerIfNeeded() {
+    if (timerState.started) return;  // only the first keystroke starts it
+    timerState.started = true;
+    timerState.running = true;
+    timerState.intervalId = setInterval(() => {
+      if (!timerState.running) return;
+      timerState.seconds += 1;
+      timerEl.textContent = formatTime(timerState.seconds);
+    }, 1000);
+  }
 
   async function stopTimerAndSubmit(hintsUsedCount) {
     if (timerState.alreadySubmitted) return; // guard against double-fire
@@ -859,6 +864,7 @@ function renderPuzzle(containerId, puzzle, topic) {
         input.addEventListener('input', (e) => {
           e.target.value = e.target.value.toUpperCase();
           if (e.target.value) {
+            startTimerIfNeeded();  // first letter placed anywhere in the grid starts the clock
             const next = inputs[r + "," + (c + 1)];
             if (next) next.focus();
           }
