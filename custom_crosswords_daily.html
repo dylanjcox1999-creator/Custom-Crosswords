@@ -210,6 +210,9 @@
       <input type="password" id="auth-password" placeholder="password (8+ chars)" autocomplete="current-password">
     </div>
     <div class="topic-input-row">
+      <input type="text" id="auth-display-name" placeholder="display name (optional, only used for Sign Up)" autocomplete="nickname">
+    </div>
+    <div class="topic-input-row">
       <button onclick="doLogin()">Log In</button>
       <button onclick="doSignup()" style="background: var(--gold);">Sign Up</button>
     </div>
@@ -217,9 +220,14 @@
   <div id="logged-in-view" style="display:none;">
     Logged in as <b id="logged-in-email"></b>.
     <button onclick="doLogout()" style="margin-left: 8px;">Log Out</button>
+    <div class="topic-input-row" style="margin-top: 8px;">
+      <input type="text" id="new-display-name" placeholder="change display name">
+      <button onclick="doUpdateDisplayName()">Save</button>
+    </div>
   </div>
   <div id="auth-status" class="status"></div>
   <div class="note">Login is only needed to save solve history and get personalized difficulty recommendations. Generating and playing puzzles works without an account.</div>
+  <div class="note">Display name is what's shown instead of your email -- falls back to the part before "@" if you don't set one. Can be changed anytime once logged in.</div>
 </div>
 
 <div class="section">
@@ -267,6 +275,7 @@ let backendAvailable = false;
 // across page reloads, not just within one session.
 let authToken = localStorage.getItem('cc_auth_token') || null;
 let authEmail = localStorage.getItem('cc_auth_email') || null;
+let authDisplayName = localStorage.getItem('cc_auth_display_name') || null;
 
 // ---------- Anonymous trial ID ----------
 // A random ID generated once per browser, stored in localStorage, used to
@@ -290,39 +299,85 @@ function updateAuthUI() {
   if (authToken) {
     loggedOut.style.display = 'none';
     loggedIn.style.display = 'block';
-    document.getElementById('logged-in-email').textContent = authEmail;
+    document.getElementById('logged-in-email').textContent = authDisplayName || authEmail;
   } else {
     loggedOut.style.display = 'block';
     loggedIn.style.display = 'none';
   }
 }
 
-function setAuth(token, email) {
+function setAuth(token, email, displayName) {
   authToken = token;
   authEmail = email;
+  authDisplayName = displayName || email;
   localStorage.setItem('cc_auth_token', token);
   localStorage.setItem('cc_auth_email', email);
+  localStorage.setItem('cc_auth_display_name', authDisplayName);
   updateAuthUI();
 }
 
 function doLogout() {
   authToken = null;
   authEmail = null;
+  authDisplayName = null;
   localStorage.removeItem('cc_auth_token');
   localStorage.removeItem('cc_auth_email');
+  localStorage.removeItem('cc_auth_display_name');
   updateAuthUI();
   document.getElementById('auth-status').textContent = 'Logged out.';
 }
 
+async function doUpdateDisplayName() {
+  const newName = document.getElementById('new-display-name').value.trim();
+  const statusEl = document.getElementById('auth-status');
+  if (!authToken) {
+    statusEl.textContent = 'Not logged in.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t update your name right now.';
+    return;
+  }
+  if (newName.length < 2 || newName.length > 30) {
+    statusEl.textContent = 'Display name must be 2-30 characters.';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/update_display_name`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ display_name: newName }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      doLogout();
+      throw new Error('session expired -- please log in again');
+    }
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+    authDisplayName = data.display_name;
+    localStorage.setItem('cc_auth_display_name', authDisplayName);
+    updateAuthUI();
+    document.getElementById('new-display-name').value = '';
+    statusEl.textContent = `Display name updated to "${authDisplayName}".`;
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
 async function doSignup() {
-  await authRequest('/signup', 'Account created and logged in.');
+  const displayName = document.getElementById('auth-display-name').value.trim();
+  await authRequest('/signup', 'Account created and logged in.', displayName || null);
 }
 
 async function doLogin() {
-  await authRequest('/login', 'Logged in.');
+  await authRequest('/login', 'Logged in.', null);
 }
 
-async function authRequest(path, successMessage) {
+async function authRequest(path, successMessage, displayName) {
   const email = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
   const statusEl = document.getElementById('auth-status');
@@ -335,16 +390,18 @@ async function authRequest(path, successMessage) {
     return;
   }
   statusEl.textContent = 'Working...';
+  const body = { email, password };
+  if (displayName) body.display_name = displayName;
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(8000),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
-    setAuth(data.access_token, data.email);
+    setAuth(data.access_token, data.email, data.display_name);
     statusEl.textContent = successMessage;
   } catch (err) {
     statusEl.textContent = 'Error: ' + err.message;

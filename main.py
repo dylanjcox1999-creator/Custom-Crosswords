@@ -83,11 +83,16 @@ class SolveSubmission(BaseModel):
 class SignupRequest(BaseModel):
     email: str
     password: str
+    display_name: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class UpdateDisplayNameRequest(BaseModel):
+    display_name: str
 
 
 class SetTierRequest(BaseModel):
@@ -163,6 +168,16 @@ def build_puzzle_response(entries, seed_base=1):
 
 # ---------------- Accounts ----------------
 
+def _effective_display_name(user: User) -> str:
+    """Returns the user's set display name, or a fallback derived from
+    their email (the part before "@") if they haven't set one. Used
+    anywhere a name needs to be shown -- keeps a raw email address from
+    ever being the only thing displayed in the UI."""
+    if user.display_name and user.display_name.strip():
+        return user.display_name.strip()
+    return user.email.split("@")[0]
+
+
 @app.post("/signup")
 def signup(req: SignupRequest, db: Session = Depends(get_db)):
     email = req.email.strip().lower()
@@ -171,17 +186,24 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
     if len(req.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
 
+    display_name = req.display_name.strip() if req.display_name else None
+    if display_name and (len(display_name) < 2 or len(display_name) > 30):
+        raise HTTPException(status_code=400, detail="Display name must be 2-30 characters.")
+
     existing = db.query(User).filter(User.email == email).first()
     if existing:
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
 
-    user = User(email=email, password_hash=auth.hash_password(req.password))
+    user = User(email=email, password_hash=auth.hash_password(req.password), display_name=display_name)
     db.add(user)
     db.commit()
     db.refresh(user)
 
     token = auth.create_access_token(user_id=user.id, email=user.email)
-    return {"access_token": token, "token_type": "bearer", "email": user.email}
+    return {
+        "access_token": token, "token_type": "bearer",
+        "email": user.email, "display_name": _effective_display_name(user),
+    }
 
 
 @app.post("/login")
@@ -194,7 +216,25 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Incorrect email or password.")
 
     token = auth.create_access_token(user_id=user.id, email=user.email)
-    return {"access_token": token, "token_type": "bearer", "email": user.email}
+    return {
+        "access_token": token, "token_type": "bearer",
+        "email": user.email, "display_name": _effective_display_name(user),
+    }
+
+
+@app.post("/update_display_name")
+def update_display_name(
+    req: UpdateDisplayNameRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    name = req.display_name.strip()
+    if len(name) < 2 or len(name) > 30:
+        raise HTTPException(status_code=400, detail="Display name must be 2-30 characters.")
+    current_user.display_name = name
+    db.add(current_user)
+    db.commit()
+    return {"display_name": _effective_display_name(current_user)}
 
 
 # ---------------- Admin (testing only) ----------------

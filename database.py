@@ -40,6 +40,15 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc))
 
+    # Optional display name shown in the UI (and any future leaderboard)
+    # instead of a raw email address. Nullable -- falls back to the part
+    # of the email before "@" if not set, so nothing breaks for existing
+    # accounts created before this field existed. This is exactly the
+    # kind of new-column-on-an-existing-table change that needs the
+    # init_db() schema-check to pick it up automatically -- see the
+    # comment there and the README for why.
+    display_name = Column(String, nullable=True)
+
     # Paid-tier support: "free" or "paid". Free-tier users share one daily
     # cap across /generate_puzzle and /reword_clue (the two endpoints that
     # actually cost money per call) -- see usage_limits.py. Paid users are
