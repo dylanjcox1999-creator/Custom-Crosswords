@@ -49,14 +49,26 @@ class User(Base):
     # comment there and the README for why.
     display_name = Column(String, nullable=True)
 
-    # Paid-tier support: "free" or "paid". Free-tier users share one daily
-    # cap across /generate_puzzle and /reword_clue (the two endpoints that
-    # actually cost money per call) -- see usage_limits.py. Paid users are
-    # never limited. Nothing bills anyone yet -- this field is what a real
-    # payment integration would flip, it doesn't process payment itself.
+    # Paid-tier support: "free" or "paid". Paid users are never limited on
+    # anything below. Nothing bills anyone yet -- this field is what a
+    # real payment integration would flip, it doesn't process payment
+    # itself.
     tier = Column(String, default="free", nullable=False)
+
+    # Daily cap for /generate_puzzle specifically (free tier only -- see
+    # usage_limits.py). Named "premium_actions" from when this was a
+    # single pool shared with reword; kept as-is for schema stability
+    # rather than renaming an existing column, but it's generate-only now.
     daily_premium_actions_used = Column(Integer, default=0, nullable=False)
     daily_premium_actions_date = Column(Date, default=lambda: datetime.date.today(), nullable=False)
+
+    # Separate daily cap for /reword_clue (free tier only). Split out from
+    # the generate cap above on purpose: reword has no anonymous-trial
+    # access at all (login required), and free accounts get their own
+    # independent daily allowance rather than sharing one pool with
+    # generation -- see usage_limits.py for the full reasoning.
+    daily_reword_used = Column(Integer, default=0, nullable=False)
+    daily_reword_date = Column(Date, default=lambda: datetime.date.today(), nullable=False)
 
     solves = relationship("SolveRecord", back_populates="user")
 

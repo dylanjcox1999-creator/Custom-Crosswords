@@ -34,7 +34,10 @@ from historical_events import get_events_for_date
 from hints import get_hint, VALID_TIERS
 from topic_recommender import recommend_topics
 from clue_rewriter import reword_clue
-from usage_limits import check_and_increment_usage, check_and_increment_anonymous_usage, UsageLimitExceeded
+from usage_limits import (
+    check_and_increment_usage, check_and_increment_reword_usage,
+    check_and_increment_anonymous_usage, UsageLimitExceeded,
+)
 import auth
 import database
 from database import get_db, User, SolveRecord, AnonymousUsage
@@ -383,23 +386,27 @@ def hint(req: HintRequest):
 @app.post("/reword_clue")
 def reword(
     req: RewordRequest,
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    x_anonymous_id: Optional[str] = Header(None),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Rewrites a clue in plainer language, without changing how hard the
-    puzzle is to solve. Accepts either a logged-in user or an anonymous
-    trial ID, sharing the same daily cap as /generate_puzzle -- both are
-    metered together as "premium actions" since both cost a real Claude
-    API call. See clue_rewriter.py for the accessibility rationale and why
-    this is kept separate from the hint tiers rather than merged into them."""
+    puzzle is to solve. Requires login -- unlike /generate_puzzle, there
+    is NO anonymous trial access to this endpoint at all. Free accounts
+    get their own separate daily pool (independent of /generate_puzzle's
+    cap), and paid accounts are unlimited. See usage_limits.py for the
+    full reasoning, and clue_rewriter.py for the accessibility rationale
+    behind the feature itself."""
     if not req.word or not req.clue:
         raise HTTPException(status_code=400, detail="word and clue are both required.")
 
-    remaining = _check_usage_for_request(current_user, x_anonymous_id, db)
+    try:
+        remaining = check_and_increment_reword_usage(current_user)
+    except UsageLimitExceeded as e:
+        raise HTTPException(status_code=429, detail=str(e))
 
     result = reword_clue(req.word, req.clue)
 
+    db.add(current_user)
     db.commit()
     result["daily_actions_remaining"] = remaining
     return result

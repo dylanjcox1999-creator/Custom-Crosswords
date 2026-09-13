@@ -279,7 +279,8 @@ let authDisplayName = localStorage.getItem('cc_auth_display_name') || null;
 
 // ---------- Anonymous trial ID ----------
 // A random ID generated once per browser, stored in localStorage, used to
-// give visitors 1 free generate/reword action per day before they sign up
+// give anonymous visitors 3 free generate_puzzle tries, ONE TIME EVER (not
+// per day) before they need to sign up -- no anonymous access to Reword at all
 // -- deliberately NOT tied to IP address (see backend/usage_limits.py for
 // why). Not personal information -- just a random token this browser
 // happens to carry.
@@ -795,18 +796,20 @@ function renderPuzzle(containerId, puzzle, topic) {
           hintTextEl.textContent = '⚠ Rewording a clue needs the backend running -- no local fallback for this one (it genuinely needs Claude to rephrase).';
           return;
         }
+        if (!authToken) {
+          hintTextEl.style.display = 'block';
+          hintTextEl.textContent = '⚠ Log in to use Reword -- unlike Generate, there\'s no anonymous trial for this one. Free accounts get 3 rewords/day.';
+          return;
+        }
         rewordBtn.disabled = true;
         rewordBtn.textContent = 'Rewording...';
-        const rewordHeaders = { 'Content-Type': 'application/json' };
-        if (authToken) {
-          rewordHeaders['Authorization'] = `Bearer ${authToken}`;
-        } else {
-          rewordHeaders['X-Anonymous-Id'] = anonymousId;
-        }
         try {
           const res = await fetch(`${API_BASE_URL}/reword_clue`, {
             method: 'POST',
-            headers: rewordHeaders,
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authToken}`,
+            },
             body: JSON.stringify({ word: p.word, clue: p.clue }),
             signal: AbortSignal.timeout(8000),
           });
@@ -827,7 +830,7 @@ function renderPuzzle(containerId, puzzle, topic) {
             showingReworded = true;
             if (typeof data.daily_actions_remaining === 'number' && data.daily_actions_remaining >= 0) {
               hintTextEl.style.display = 'block';
-              hintTextEl.textContent = `${data.daily_actions_remaining} free generate/reword actions left today.`;
+              hintTextEl.textContent = `${data.daily_actions_remaining} free rewords left today.`;
             }
           } else {
             rewordBtn.textContent = '🔄 Reword';
@@ -1055,7 +1058,9 @@ async function generateCustomPuzzle() {
     const puzzle = adaptBackendPuzzle(data);
     renderPuzzle('custom-grid-container', puzzle, topic);
     const remainingNote = typeof data.daily_actions_remaining === 'number' && data.daily_actions_remaining >= 0
-      ? ` (${data.daily_actions_remaining} free generate/reword actions left today)`
+      ? authToken
+        ? ` (${data.daily_actions_remaining} free generations left today)`
+        : ` (${data.daily_actions_remaining} free trial generations left, ever)`
       : '';
     statusEl.textContent =
       `Placed ${puzzle.placed.length} of ${data.word_bank_used.length} words for "${topic}" ` +
