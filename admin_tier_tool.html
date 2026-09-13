@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Admin: Set Tier</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: #F5F1E8;
+    color: #222;
+    margin: 0;
+    padding: 20px;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  h1 { color: #152A47; font-size: 1.3em; }
+  label { display: block; margin-top: 14px; font-size: 0.9em; font-weight: 600; color: #152A47; }
+  input, select {
+    width: 100%;
+    padding: 10px;
+    margin-top: 4px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-size: 1em;
+    box-sizing: border-box;
+  }
+  button {
+    margin-top: 20px;
+    width: 100%;
+    padding: 12px;
+    background: #152A47;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 1em;
+    cursor: pointer;
+  }
+  button:disabled { background: #999; }
+  #result {
+    margin-top: 16px;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 0.9em;
+    white-space: pre-wrap;
+    display: none;
+  }
+  #result.success { background: #d9f2d9; color: #1a6b1a; display: block; }
+  #result.error { background: #f8d7d7; color: #8b1e2f; display: block; }
+  .note { font-size: 0.8em; color: #666; margin-top: 20px; }
+</style>
+</head>
+<body>
+
+<h1>🔧 Admin: Set Account Tier</h1>
+
+<label for="admin-key">Admin key (X-Admin-Key)</label>
+<input type="password" id="admin-key" placeholder="your ADMIN_SECRET_KEY" autocomplete="off">
+
+<label for="email">Account email</label>
+<input type="text" id="email" placeholder="you@example.com" autocomplete="off">
+
+<label for="tier">Tier</label>
+<select id="tier">
+  <option value="paid">paid</option>
+  <option value="free">free</option>
+</select>
+
+<button id="submit-btn" onclick="setTier()">Update Tier</button>
+
+<div id="result"></div>
+
+<div class="note">
+  Calls <code>POST /admin/set_tier</code> on your backend directly. This key is never saved anywhere by this page -- it's only sent with the one request when you tap the button.
+</div>
+
+<script>
+const API_BASE_URL = 'https://custom-crosswords.onrender.com';
+
+async function setTier() {
+  const adminKey = document.getElementById('admin-key').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const tier = document.getElementById('tier').value;
+  const btn = document.getElementById('submit-btn');
+  const resultEl = document.getElementById('result');
+
+  resultEl.className = '';
+
+  if (!adminKey || !email) {
+    resultEl.className = 'error';
+    resultEl.textContent = 'Enter both the admin key and an email.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Working...';
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/admin/set_tier`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Admin-Key': adminKey,
+      },
+      body: JSON.stringify({ email, tier }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || `Server returned ${res.status}`);
+    }
+    resultEl.className = 'success';
+    resultEl.textContent = `Success: ${data.email} is now "${data.tier}".`;
+  } catch (err) {
+    resultEl.className = 'error';
+    resultEl.textContent = 'Error: ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Update Tier';
+  }
+}
+</script>
+
+</body>
+</html>
