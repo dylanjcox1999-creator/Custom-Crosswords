@@ -333,7 +333,7 @@
 // Point this at your running `uvicorn main:app` instance (see backend/README.md).
 // Everything below degrades gracefully to local computation if the backend
 // isn't reachable -- this file works standalone either way.
-const API_BASE_URL = 'https://topicross-api.onrender.com';
+const API_BASE_URL = 'https://custom-crosswords.onrender.com';
 let backendAvailable = false;
 
 // ---------- Auth ----------
@@ -589,6 +589,9 @@ async function authRequest(path, successMessage, displayName) {
 
 async function checkBackendHealth() {
   const indicator = document.getElementById('backend-indicator');
+
+  // Quick check first -- covers the common case where the instance is
+  // already warm, so we don't make everyone wait on every page load.
   try {
     const res = await fetch(`${API_BASE_URL}/health`, { signal: AbortSignal.timeout(2000) });
     if (res.ok) {
@@ -598,8 +601,31 @@ async function checkBackendHealth() {
       return;
     }
   } catch (e) {
-    // fall through to offline state
+    // fall through to the slow-path retry below
   }
+
+  // The free Render tier spins down on inactivity and can take 50+
+  // seconds to wake back up on the first request. Don't declare the
+  // backend "not running" just because the quick check above timed
+  // out -- that would incorrectly block puzzle generation for the
+  // whole session even once the instance finishes waking up. Retry
+  // once with a much longer timeout, showing a clear waking-up state
+  // in the meantime.
+  indicator.textContent = 'Backend: waking up (free tier can take up to a minute)...';
+  indicator.className = 'backend-status offline';
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/health`, { signal: AbortSignal.timeout(60000) });
+    if (res.ok) {
+      backendAvailable = true;
+      indicator.textContent = 'Backend: connected (hints & solve-tracking are live)';
+      indicator.className = 'backend-status connected';
+      return;
+    }
+  } catch (e) {
+    // genuinely unreachable -- fall through to offline state
+  }
+
   backendAvailable = false;
   indicator.textContent = 'Backend: not running — using local fallback (see README to start it)';
   indicator.className = 'backend-status offline';
