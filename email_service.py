@@ -1,67 +1,89 @@
 """
-Sends the password-reset email. This is a pluggable interface with an
-HONEST FALLBACK, not a working email integration -- there is currently no
-email-sending service (SendGrid, Resend, Mailgun, AWS SES, etc.) wired
-into this project.
+Sends the password-reset email via Resend (https://resend.com), with an
+HONEST FALLBACK to console-logging the link when Resend isn't configured.
 
-Without EMAIL_SERVICE configured, reset links are printed to the server
-log instead of emailed. This means /forgot_password currently only works
-if you (or whoever has access to Render's logs) manually relay the link
-to the user -- it is NOT a working self-service flow yet. This is
-deliberate honesty, not a bug: pretending email delivery works when it
-doesn't would be worse than clearly marking the gap.
+CRITICAL LIMITATION, confirmed directly against Resend's current docs
+(not assumed from memory): the no-setup sender address
+"onboarding@resend.dev" can ONLY deliver to the Resend account owner's
+own verified email address -- it will return a 403 error for any other
+recipient. This means, until a real domain is verified with Resend:
 
-To make this a real working feature, pick an email provider, get an API
-key, and implement send_reset_email() below to actually call that
-provider's API instead of falling through to the log-only fallback.
-Reasonable options as of this writing: Resend, SendGrid, Mailgun, AWS
-SES -- pricing and free-tier terms change, so check current offerings
-rather than assume anything stated in an older reference is still
-accurate.
+  - You (the account owner) CAN successfully test this end-to-end by
+    requesting a reset for your own account email
+  - Real users signing up with a DIFFERENT email will NOT receive
+    anything -- the send will fail with a 403 from Resend's API
+
+To actually email real users, verify a domain you own in the Resend
+dashboard (Domains -> Add Domain), add the DNS records Resend gives you
+at your domain's DNS provider, wait for verification, then set
+RESEND_FROM_ADDRESS to an address on that domain (e.g.
+"noreply@yourdomain.com"). This project doesn't own a domain yet as of
+this writing -- that's a real, separate decision (and cost) from just
+adding an API key.
+
+Uses a plain HTTP POST via `requests` (already a dependency) rather than
+adding the `resend` SDK package, to keep the dependency footprint small
+for what is, under the hood, a single simple API call.
 """
 import os
+import requests
+
+RESEND_API_URL = "https://api.resend.com/emails"
 
 
 def send_reset_email(to_email: str, reset_link: str) -> bool:
     """
-    Attempts to send a password reset email. Returns True if a real send
-    was attempted (regardless of provider-side success/failure, which
-    would need provider-specific error handling once one is wired in),
-    False if it fell through to the log-only fallback.
+    Attempts to send a password reset email via Resend. Returns True if
+    the email was actually sent, False if it fell through to the
+    log-only fallback (no RESEND_API_KEY configured).
 
-    SECURITY NOTE for whoever wires in a real provider: do not log
-    reset_link in production once real email sending works -- the
-    console-log fallback below is acceptable ONLY because it is
-    explicitly the sole delivery mechanism when no real provider is
-    configured. Once a real provider exists, logging the link
-    alongside a real send would defeat the purpose of emailing it
-    privately in the first place.
+    Raises requests.HTTPError if Resend's API rejects the request (for
+    example, a 403 because the recipient isn't the account owner's own
+    email and no domain is verified yet -- see the module docstring).
+    Deliberately does NOT swallow this error into a silent log-fallback:
+    a failed real send should surface as a real error to whoever's
+    monitoring the backend, not disappear silently the way it would if
+    treated the same as "no provider configured at all."
     """
-    if os.environ.get("EMAIL_SERVICE") == "resend" and os.environ.get("RESEND_API_KEY"):
-        # Not implemented -- placeholder for wiring in a real provider.
-        # Example shape (untested, Resend's API may have changed):
-        #   import requests
-        #   requests.post(
-        #       "https://api.resend.com/emails",
-        #       headers={"Authorization": f"Bearer {os.environ['RESEND_API_KEY']}"},
-        #       json={
-        #           "from": "noreply@yourdomain.com",
-        #           "to": to_email,
-        #           "subject": "Reset your password",
-        #           "html": f"<p>Click to reset your password: <a href='{reset_link}'>{reset_link}</a></p>"
-        #                   f"<p>This link expires in 30 minutes.</p>",
-        #       },
-        #   )
-        raise NotImplementedError(
-            "EMAIL_SERVICE=resend is set but send_reset_email() doesn't actually "
-            "call Resend's API yet -- fill in the real implementation above."
-        )
-
-    # Honest fallback: no real email provider configured. Print the link
-    # so a developer/admin watching Render's logs can manually relay it.
+    api_key = os.environ.get("RESEND_API_KEY")
     print(
-        f"[PASSWORD RESET -- NO EMAIL SERVICE CONFIGURED] "
-        f"Reset link for {to_email}: {reset_link} (expires in 30 minutes). "
-        f"This was printed instead of emailed -- see email_service.py."
+        f"[DEBUG send_reset_email] pid={os.getpid()} "
+        f"api_key_present={api_key is not None} "
+        f"api_key_len={len(api_key) if api_key else 0} "
+        f"from_address={os.environ.get('RESEND_FROM_ADDRESS', '(not set)')}"
     )
-    return False
+    if not api_key:
+        # Honest fallback: no real email provider configured. Print the
+        # link so a developer/admin watching Render's logs can manually
+        # relay it. SECURITY NOTE: this logging is acceptable ONLY
+        # because it's the sole delivery mechanism when no real provider
+        # exists -- once RESEND_API_KEY is set, this branch is never
+        # reached, and the link is never logged.
+        print(
+            f"[PASSWORD RESET -- NO EMAIL SERVICE CONFIGURED] "
+            f"Reset link for {to_email}: {reset_link} (expires in 30 minutes). "
+            f"This was printed instead of emailed -- see email_service.py."
+        )
+        return False
+
+    from_address = os.environ.get("RESEND_FROM_ADDRESS", "onboarding@resend.dev")
+
+    response = requests.post(
+        RESEND_API_URL,
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={
+            "from": from_address,
+            "to": [to_email],
+            "subject": "Reset your Custom Crosswords Daily password",
+            "html": (
+                f"<p>Someone requested a password reset for this account. "
+                f"If that was you, click below:</p>"
+                f"<p><a href='{reset_link}'>{reset_link}</a></p>"
+                f"<p>This link expires in 30 minutes. If you didn't request "
+                f"this, you can safely ignore this email.</p>"
+            ),
+        },
+        timeout=10,
+    )
+    response.raise_for_status()  # raises if Resend rejects the request (e.g. 403)
+    return True
