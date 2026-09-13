@@ -19,7 +19,7 @@ Run locally:
 import datetime
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -32,9 +32,10 @@ from historical_events import get_events_for_date
 from hints import get_hint, VALID_TIERS
 from topic_recommender import recommend_topics
 from clue_rewriter import reword_clue
+from usage_limits import check_and_increment_usage, check_and_increment_anonymous_usage, UsageLimitExceeded
 import auth
 import database
-from database import get_db, User, SolveRecord
+from database import get_db, User, SolveRecord, AnonymousUsage
 
 app = FastAPI(title="Custom Crosswords Daily API")
 
@@ -108,6 +109,30 @@ def get_current_user(
     return user
 
 
+def get_current_user_optional(
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """Same idea as get_current_user, but returns None instead of raising
+    when there's no token -- used by endpoints that accept EITHER a logged
+    -in user OR an anonymous trial ID (/generate_puzzle, /reword_clue)."""
+    if creds is None:
+        return None
+    try:
+        payload = auth.decode_access_token(creds.credentials)
+    except pyjwt.InvalidTokenError:
+        return None
+    return db.query(User).filter(User.id == int(payload["sub"])).first()
+
+
+def get_or_create_anonymous_usage(anon_id: str, db: Session) -> AnonymousUsage:
+    row = db.query(AnonymousUsage).filter(AnonymousUsage.anon_id == anon_id).first()
+    if row is None:
+        row = AnonymousUsage(anon_id=anon_id)
+        db.add(row)
+    return row
+
+
 def build_puzzle_response(entries, seed_base=1):
     """Runs a list of (WORD, clue) tuples through the real compaction-search
     generator and returns the same JSON shape used across the whole book
@@ -165,26 +190,71 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     return {"access_token": token, "token_type": "bearer", "email": user.email}
 
 
-# ---------------- Puzzles (no login required) ----------------
+# ---------------- Puzzles ----------------
+# /generate_puzzle and /reword_clue accept EITHER a logged-in user
+# (Authorization: Bearer <token>, 3/day) OR an anonymous trial ID
+# (X-Anonymous-Id header, 1/day) -- see usage_limits.py for why this isn't
+# IP-based. Exactly one of the two is required; anonymous IDs are
+# generated and stored client-side in localStorage, not tied to any
+# personal info.
+
+def _check_usage_for_request(
+    current_user: Optional[User], anon_id: Optional[str], db: Session
+) -> int:
+    """Shared by /generate_puzzle and /reword_clue. Returns the remaining
+    action count to surface to the frontend, or raises HTTPException on
+    missing identity or a hit usage cap."""
+    if current_user is not None:
+        try:
+            return check_and_increment_usage(current_user)
+        except UsageLimitExceeded as e:
+            raise HTTPException(status_code=429, detail=str(e))
+
+    if anon_id:
+        anon_usage = get_or_create_anonymous_usage(anon_id, db)
+        try:
+            return check_and_increment_anonymous_usage(anon_usage)
+        except UsageLimitExceeded as e:
+            raise HTTPException(status_code=429, detail=str(e))
+
+    raise HTTPException(
+        status_code=401,
+        detail="Log in, or provide an X-Anonymous-Id header to use your free trial generation.",
+    )
+
 
 @app.post("/generate_puzzle")
-def generate_puzzle(req: TopicRequest):
+def generate_puzzle(
+    req: TopicRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    x_anonymous_id: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
     if not req.topic or not req.topic.strip():
         raise HTTPException(status_code=400, detail="Topic cannot be empty.")
     if not (5 <= req.num_words <= 20):
         raise HTTPException(status_code=400, detail="num_words must be between 5 and 20.")
+
+    remaining = _check_usage_for_request(current_user, x_anonymous_id, db)
 
     try:
         entries = generate_word_bank(
             req.topic.strip(), n_words=req.num_words, difficulty=req.difficulty
         )
     except ValueError as e:
+        # Generation failed -- don't charge the daily quota for a failed
+        # attempt that wasn't the caller's fault (a malformed Claude
+        # response, for example). Roll back the increment before it commits.
+        db.rollback()
         raise HTTPException(status_code=422, detail=str(e))
+
+    db.commit()
 
     result = build_puzzle_response(entries, seed_base=abs(hash(req.topic)) % 10000)
     result["topic"] = req.topic
     result["difficulty"] = req.difficulty
     result["word_bank_used"] = [{"word": w, "clue": c} for w, c in entries]
+    result["daily_actions_remaining"] = remaining
     return result
 
 
@@ -219,14 +289,28 @@ def hint(req: HintRequest):
 
 
 @app.post("/reword_clue")
-def reword(req: RewordRequest):
+def reword(
+    req: RewordRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    x_anonymous_id: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
     """Rewrites a clue in plainer language, without changing how hard the
-    puzzle is to solve. No login required, same as /hint -- see
-    clue_rewriter.py for the accessibility rationale and why this is kept
-    separate from the hint tiers rather than merged into them."""
+    puzzle is to solve. Accepts either a logged-in user or an anonymous
+    trial ID, sharing the same daily cap as /generate_puzzle -- both are
+    metered together as "premium actions" since both cost a real Claude
+    API call. See clue_rewriter.py for the accessibility rationale and why
+    this is kept separate from the hint tiers rather than merged into them."""
     if not req.word or not req.clue:
         raise HTTPException(status_code=400, detail="word and clue are both required.")
-    return reword_clue(req.word, req.clue)
+
+    remaining = _check_usage_for_request(current_user, x_anonymous_id, db)
+
+    result = reword_clue(req.word, req.clue)
+
+    db.commit()
+    result["daily_actions_remaining"] = remaining
+    return result
 
 
 # ---------------- Progress tracking (login required) ----------------

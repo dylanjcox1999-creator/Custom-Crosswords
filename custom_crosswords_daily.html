@@ -268,6 +268,22 @@ let backendAvailable = false;
 let authToken = localStorage.getItem('cc_auth_token') || null;
 let authEmail = localStorage.getItem('cc_auth_email') || null;
 
+// ---------- Anonymous trial ID ----------
+// A random ID generated once per browser, stored in localStorage, used to
+// give visitors 1 free generate/reword action per day before they sign up
+// -- deliberately NOT tied to IP address (see backend/usage_limits.py for
+// why). Not personal information -- just a random token this browser
+// happens to carry.
+function getOrCreateAnonymousId() {
+  let id = localStorage.getItem('cc_anon_id');
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem('cc_anon_id', id);
+  }
+  return id;
+}
+const anonymousId = getOrCreateAnonymousId();
+
 function updateAuthUI() {
   const loggedOut = document.getElementById('logged-out-view');
   const loggedIn = document.getElementById('logged-in-view');
@@ -724,13 +740,27 @@ function renderPuzzle(containerId, puzzle, topic) {
         }
         rewordBtn.disabled = true;
         rewordBtn.textContent = 'Rewording...';
+        const rewordHeaders = { 'Content-Type': 'application/json' };
+        if (authToken) {
+          rewordHeaders['Authorization'] = `Bearer ${authToken}`;
+        } else {
+          rewordHeaders['X-Anonymous-Id'] = anonymousId;
+        }
         try {
           const res = await fetch(`${API_BASE_URL}/reword_clue`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: rewordHeaders,
             body: JSON.stringify({ word: p.word, clue: p.clue }),
             signal: AbortSignal.timeout(8000),
           });
+          if (res.status === 401) {
+            doLogout();
+            throw new Error('session expired -- please log in again');
+          }
+          if (res.status === 429) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(errBody.detail || 'Daily limit reached.');
+          }
           if (!res.ok) throw new Error(`Backend returned ${res.status}`);
           const data = await res.json();
           rewordedText = data.reworded;
@@ -738,6 +768,10 @@ function renderPuzzle(containerId, puzzle, topic) {
             clueBodyEl.textContent = rewordedText;
             rewordBtn.textContent = '↩ Original wording';
             showingReworded = true;
+            if (typeof data.daily_actions_remaining === 'number' && data.daily_actions_remaining >= 0) {
+              hintTextEl.style.display = 'block';
+              hintTextEl.textContent = `${data.daily_actions_remaining} free generate/reword actions left today.`;
+            }
           } else {
             rewordBtn.textContent = '🔄 Reword';
             hintTextEl.style.display = 'block';
@@ -929,16 +963,33 @@ async function generateCustomPuzzle() {
   }
 
   btn.disabled = true;
-  statusEl.textContent = `Asking your backend to generate a ${difficulty} puzzle for "${topic}"...`;
+  statusEl.textContent = authToken
+    ? `Asking your backend to generate a ${difficulty} puzzle for "${topic}"...`
+    : `Generating your free trial puzzle for "${topic}"...`;
   document.getElementById('custom-grid-container').innerHTML = '';
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  } else {
+    headers['X-Anonymous-Id'] = anonymousId;
+  }
 
   try {
     const res = await fetch(`${API_BASE_URL}/generate_puzzle`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ topic, num_words: 13, difficulty }),
       signal: AbortSignal.timeout(30000), // word-bank generation + grid placement can take a few seconds
     });
+    if (res.status === 401) {
+      doLogout();
+      throw new Error('session expired -- please log in again');
+    }
+    if (res.status === 429) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.detail || 'Daily limit reached.');
+    }
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
       throw new Error(errBody.detail || `Backend returned ${res.status}`);
@@ -946,9 +997,12 @@ async function generateCustomPuzzle() {
     const data = await res.json();
     const puzzle = adaptBackendPuzzle(data);
     renderPuzzle('custom-grid-container', puzzle, topic);
+    const remainingNote = typeof data.daily_actions_remaining === 'number' && data.daily_actions_remaining >= 0
+      ? ` (${data.daily_actions_remaining} free generate/reword actions left today)`
+      : '';
     statusEl.textContent =
       `Placed ${puzzle.placed.length} of ${data.word_bank_used.length} words for "${topic}" ` +
-      `(${difficulty}, via your real generator2.py engine).`;
+      `(${difficulty}, via your real generator2.py engine).${remainingNote}`;
   } catch (err) {
     statusEl.textContent = 'Error generating puzzle: ' + err.message;
   } finally {

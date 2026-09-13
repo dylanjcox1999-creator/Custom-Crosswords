@@ -14,7 +14,7 @@ import os
 import datetime
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey
+    create_engine, Column, Integer, String, Float, Boolean, Date, DateTime, ForeignKey
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -40,6 +40,15 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc))
 
+    # Paid-tier support: "free" or "paid". Free-tier users share one daily
+    # cap across /generate_puzzle and /reword_clue (the two endpoints that
+    # actually cost money per call) -- see usage_limits.py. Paid users are
+    # never limited. Nothing bills anyone yet -- this field is what a real
+    # payment integration would flip, it doesn't process payment itself.
+    tier = Column(String, default="free", nullable=False)
+    daily_premium_actions_used = Column(Integer, default=0, nullable=False)
+    daily_premium_actions_date = Column(Date, default=lambda: datetime.date.today(), nullable=False)
+
     solves = relationship("SolveRecord", back_populates="user")
 
 
@@ -56,6 +65,27 @@ class SolveRecord(Base):
     logged_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc))
 
     user = relationship("User", back_populates="solves")
+
+
+class AnonymousUsage(Base):
+    """Tracks a small trial allowance for visitors who haven't signed up
+    yet, keyed by a random ID generated client-side and stored in the
+    browser's localStorage -- NOT by IP address. See usage_limits.py for
+    why IP-based tracking was rejected (shared IPs punish innocent users,
+    mobile carrier-grade NAT makes it unreliable, and it's trivially
+    bypassed by switching networks, which defeats the point of a cost
+    control anyway).
+
+    Deliberately stored in the real database, not in-memory: Render's free
+    tier sleeps after 15 minutes idle, which would silently reset an
+    in-memory counter far too often for this to function as a real trial
+    limit.
+    """
+    __tablename__ = "anonymous_usage"
+
+    anon_id = Column(String, primary_key=True)
+    daily_actions_used = Column(Integer, default=0, nullable=False)
+    daily_actions_date = Column(Date, default=lambda: datetime.date.today(), nullable=False)
 
 
 def init_db():
