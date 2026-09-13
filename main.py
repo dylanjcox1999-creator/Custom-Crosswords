@@ -274,6 +274,19 @@ FRONTEND_URL = os.environ.get(
 )
 
 
+@app.get("/debug_env_check")
+def debug_env_check():
+    """TEMPORARY debug endpoint -- delete once the Resend env var issue
+    is confirmed fixed. Reports what the live process actually sees,
+    without leaking the secret value itself."""
+    key = os.environ.get("RESEND_API_KEY")
+    return {
+        "resend_api_key_present": key is not None,
+        "resend_api_key_length": len(key) if key else 0,
+        "resend_from_address": os.environ.get("RESEND_FROM_ADDRESS", "(not set)"),
+    }
+
+
 @app.post("/forgot_password")
 def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """Starts a password reset. Always returns the same generic message
