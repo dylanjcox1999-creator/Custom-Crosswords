@@ -70,7 +70,23 @@ class User(Base):
     daily_reword_used = Column(Integer, default=0, nullable=False)
     daily_reword_date = Column(Date, default=lambda: datetime.date.today(), nullable=False)
 
-    solves = relationship("SolveRecord", back_populates="user")
+    # Password reset support. We store a HASH of the reset token, never
+    # the raw token itself -- same principle as password_hash: if the
+    # database were ever exposed, a stored raw token would let an
+    # attacker reset anyone's password directly, exactly the outcome
+    # this feature exists to prevent. Both nullable -- most users have no
+    # active reset request most of the time. See auth.py for token
+    # generation/hashing and main.py's /forgot_password and
+    # /reset_password endpoints.
+    reset_token_hash = Column(String, nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
+
+    # cascade="all, delete-orphan": deleting a User automatically deletes
+    # their SolveRecord rows too via the ORM (issues the child DELETEs
+    # before the parent DELETE) -- needed for /delete_account to work
+    # without leaving orphaned rows or hitting a foreign-key violation,
+    # since SolveRecord.user_id is NOT NULL.
+    solves = relationship("SolveRecord", back_populates="user", cascade="all, delete-orphan")
 
 
 class SolveRecord(Base):

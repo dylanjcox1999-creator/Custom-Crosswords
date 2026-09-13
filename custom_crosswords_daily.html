@@ -212,9 +212,24 @@
     <div class="topic-input-row">
       <input type="text" id="auth-display-name" placeholder="display name (optional, only used for Sign Up)" autocomplete="nickname">
     </div>
+    <div style="font-size: 0.82em; margin: 6px 0;">
+      <label>
+        <input type="checkbox" id="agree-to-terms">
+        I agree to the <a href="terms_of_service.html" target="_blank">Terms of Service</a> and <a href="privacy_policy.html" target="_blank">Privacy Policy</a> (required for Sign Up)
+      </label>
+    </div>
     <div class="topic-input-row">
       <button onclick="doLogin()">Log In</button>
       <button onclick="doSignup()" style="background: var(--gold);">Sign Up</button>
+    </div>
+    <div style="margin-top: 8px;">
+      <a href="#" onclick="showForgotPassword(); return false;" style="font-size: 0.85em;">Forgot password?</a>
+    </div>
+    <div id="forgot-password-panel" style="display:none; margin-top: 10px;">
+      <div class="topic-input-row">
+        <input type="text" id="forgot-email" placeholder="your account email">
+        <button onclick="doForgotPassword()">Send Reset Link</button>
+      </div>
     </div>
   </div>
   <div id="logged-in-view" style="display:none;">
@@ -224,10 +239,29 @@
       <input type="text" id="new-display-name" placeholder="change display name">
       <button onclick="doUpdateDisplayName()">Save</button>
     </div>
+    <div style="margin-top: 14px;">
+      <a href="#" onclick="showDeleteAccount(); return false;" style="font-size: 0.85em; color: #8b1e2f;">Delete my account</a>
+    </div>
+    <div id="delete-account-panel" style="display:none; margin-top: 10px; padding: 10px; background: #f8d7d7; border-radius: 8px;">
+      <div style="font-size: 0.85em; margin-bottom: 6px;">⚠ This permanently deletes your account and all solve history. This cannot be undone. Enter your password to confirm.</div>
+      <div class="topic-input-row">
+        <input type="password" id="delete-account-password" placeholder="confirm password">
+        <button onclick="doDeleteAccount()" style="background: #8b1e2f;">Permanently Delete</button>
+      </div>
+    </div>
   </div>
   <div id="auth-status" class="status"></div>
   <div class="note">Login is only needed to save solve history and get personalized difficulty recommendations. Generating and playing puzzles works without an account.</div>
   <div class="note">Display name is what's shown instead of your email -- falls back to the part before "@" if you don't set one. Can be changed anytime once logged in.</div>
+</div>
+
+<div class="section" id="reset-password-section" style="display:none;">
+  <h2>🔑 Reset Your Password</h2>
+  <div class="topic-input-row">
+    <input type="password" id="reset-new-password" placeholder="new password (8+ chars)" autocomplete="new-password">
+    <button onclick="doResetPassword()">Set New Password</button>
+  </div>
+  <div id="reset-password-status" class="status"></div>
 </div>
 
 <div class="section">
@@ -401,8 +435,120 @@ async function doUpdateDisplayName() {
   }
 }
 
+// ---------- Forgot / reset password ----------
+function showForgotPassword() {
+  document.getElementById('forgot-password-panel').style.display = 'block';
+}
+
+async function doForgotPassword() {
+  const email = document.getElementById('forgot-email').value.trim();
+  const statusEl = document.getElementById('auth-status');
+  if (!email) {
+    statusEl.textContent = 'Enter your account email.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t request a reset right now.';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/forgot_password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+    statusEl.textContent = data.message;
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
+async function doResetPassword() {
+  const newPassword = document.getElementById('reset-new-password').value;
+  const statusEl = document.getElementById('reset-password-status');
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('reset_token');
+  if (!token) {
+    statusEl.textContent = 'No reset token found in the page URL.';
+    return;
+  }
+  if (newPassword.length < 8) {
+    statusEl.textContent = 'Password must be at least 8 characters.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t reset your password right now.';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/reset_password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, new_password: newPassword }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+    statusEl.textContent = data.message + ' Redirecting you to log in...';
+    setTimeout(() => {
+      // strip the token out of the URL and reload into the normal logged-out view
+      window.location.href = window.location.pathname;
+    }, 2500);
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
+// ---------- Delete account ----------
+function showDeleteAccount() {
+  document.getElementById('delete-account-panel').style.display = 'block';
+}
+
+async function doDeleteAccount() {
+  const password = document.getElementById('delete-account-password').value;
+  const statusEl = document.getElementById('auth-status');
+  if (!authToken) {
+    statusEl.textContent = 'Not logged in.';
+    return;
+  }
+  if (!password) {
+    statusEl.textContent = 'Enter your password to confirm deletion.';
+    return;
+  }
+  if (!backendAvailable) {
+    statusEl.textContent = '⚠ Backend not connected -- can\'t delete your account right now.';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/delete_account`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ password }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+    doLogout();
+    statusEl.textContent = 'Your account has been permanently deleted.';
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
 async function doSignup() {
   const displayName = document.getElementById('auth-display-name').value.trim();
+  const agreed = document.getElementById('agree-to-terms').checked;
+  if (!agreed) {
+    document.getElementById('auth-status').textContent =
+      'Please check the box agreeing to the Terms of Service and Privacy Policy to sign up.';
+    return;
+  }
   await authRequest('/signup', 'Account created and logged in.', displayName || null);
 }
 
@@ -933,6 +1079,14 @@ async function loadOnThisDayPuzzle() {
 
 window.addEventListener('DOMContentLoaded', async () => {
   updateAuthUI();
+
+  // If this page was opened from a password-reset link, show the reset
+  // panel instead of (well, alongside) the normal account UI.
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('reset_token')) {
+    document.getElementById('reset-password-section').style.display = 'block';
+  }
+
   await checkBackendHealth();
   await loadOnThisDayPuzzle();
 });
@@ -1175,6 +1329,12 @@ async function generateCustomPuzzle() {
   }
 }
 </script>
+
+<div style="text-align:center; padding: 20px 10px; font-size: 0.8em; color: #666;">
+  <a href="privacy_policy.html" target="_blank">Privacy Policy</a>
+  &nbsp;·&nbsp;
+  <a href="terms_of_service.html" target="_blank">Terms of Service</a>
+</div>
 
 </body>
 </html>

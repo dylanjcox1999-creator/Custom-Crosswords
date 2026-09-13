@@ -34,6 +34,7 @@ from historical_events import get_events_for_date
 from hints import get_hint, VALID_TIERS
 from topic_recommender import recommend_topics
 from clue_rewriter import reword_clue
+from email_service import send_reset_email
 from usage_limits import (
     check_and_increment_usage, check_and_increment_reword_usage,
     check_and_increment_anonymous_usage, UsageLimitExceeded,
@@ -97,6 +98,19 @@ class LoginRequest(BaseModel):
 
 class UpdateDisplayNameRequest(BaseModel):
     display_name: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str
 
 
 class SetTierRequest(BaseModel):
@@ -239,6 +253,93 @@ def update_display_name(
     db.add(current_user)
     db.commit()
     return {"display_name": _effective_display_name(current_user)}
+
+
+# The page a reset-password link points users back to. Configurable via
+# environment variable since this could change if the frontend ever moves
+# off GitHub Pages -- falls back to the current known URL.
+FRONTEND_URL = os.environ.get(
+    "FRONTEND_URL",
+    "https://dylanjcox1999-creator.github.io/Custom-Crosswords/custom_crosswords_daily.html",
+)
+
+
+@app.post("/forgot_password")
+def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Starts a password reset. Always returns the same generic message
+    whether or not the email has an account -- same principle as /login's
+    error message: don't leak which emails have accounts to someone
+    probing this endpoint.
+
+    HONEST LIMITATION: see email_service.py. Without a real email
+    provider configured, the reset link is only printed to the server
+    log, not actually emailed -- this endpoint is not yet a working
+    self-service flow for end users without an admin manually relaying
+    the link."""
+    email = req.email.strip().lower()
+    user = db.query(User).filter(User.email == email).first()
+
+    if user is not None:
+        raw_token, token_hash = auth.generate_reset_token()
+        user.reset_token_hash = token_hash
+        user.reset_token_expires = datetime.datetime.now(
+            datetime.timezone.utc
+        ) + datetime.timedelta(minutes=auth.RESET_TOKEN_EXPIRY_MINUTES)
+        db.add(user)
+        db.commit()
+
+        reset_link = f"{FRONTEND_URL}?reset_token={raw_token}"
+        send_reset_email(user.email, reset_link)
+
+    return {
+        "message": "If an account with that email exists, a password reset link has been sent."
+    }
+
+
+@app.post("/reset_password")
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    if len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+
+    token_hash = auth.hash_reset_token(req.token)
+    user = db.query(User).filter(User.reset_token_hash == token_hash).first()
+
+    if user is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+
+    if user.reset_token_expires is None or datetime.datetime.now(datetime.timezone.utc) > user.reset_token_expires:
+        raise HTTPException(
+            status_code=400, detail="This reset link has expired. Please request a new one."
+        )
+
+    user.password_hash = auth.hash_password(req.new_password)
+    # Single-use: clear the token immediately so this same link can't be
+    # replayed to reset the password again.
+    user.reset_token_hash = None
+    user.reset_token_expires = None
+    db.add(user)
+    db.commit()
+    return {"message": "Password successfully reset. You can now log in with your new password."}
+
+
+@app.post("/delete_account")
+def delete_account(
+    req: DeleteAccountRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Permanently deletes the logged-in user's account and all their
+    solve history. Requires re-entering the password (not just a valid
+    session token) as a deliberate speed bump against a stolen/leaked
+    token alone being enough to destroy an account -- same reasoning as
+    requiring a password to change one. Cascades to delete SolveRecord
+    rows too, via the relationship's cascade config in database.py."""
+    if not auth.verify_password(req.password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Incorrect password.")
+
+    db.delete(current_user)
+    db.commit()
+    return {"deleted": True}
 
 
 # ---------------- Admin (testing only) ----------------
