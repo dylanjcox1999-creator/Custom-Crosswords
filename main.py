@@ -336,16 +336,25 @@ def generate_puzzle(
         entries = generate_word_bank(
             req.topic.strip(), n_words=req.num_words, difficulty=req.difficulty
         )
-    except ValueError as e:
-        # Generation failed -- don't charge the daily quota for a failed
-        # attempt that wasn't the caller's fault (a malformed Claude
-        # response, for example). Roll back the increment before it commits.
+        result = build_puzzle_response(entries, seed_base=abs(hash(req.topic)) % 10000)
+    except (ValueError, HTTPException) as e:
+        # Generation can fail at TWO separate stages: Claude's word bank
+        # (ValueError) or grid placement afterward (build_puzzle_response
+        # raises HTTPException if the words won't interlock into a valid
+        # grid). Either way, don't charge the daily/lifetime quota for an
+        # attempt that produced no usable puzzle -- roll back the
+        # increment before it commits. This fixes a real bug: previously
+        # only the word-bank failure was caught here, so a grid-placement
+        # failure would silently consume a trial/daily use while handing
+        # back nothing -- exactly what made an anonymous 3-try trial
+        # sometimes only yield 2 real puzzles.
         db.rollback()
+        if isinstance(e, HTTPException):
+            raise
         raise HTTPException(status_code=422, detail=str(e))
 
     db.commit()
 
-    result = build_puzzle_response(entries, seed_base=abs(hash(req.topic)) % 10000)
     result["topic"] = req.topic
     result["difficulty"] = req.difficulty
     result["word_bank_used"] = [{"word": w, "clue": c} for w, c in entries]
