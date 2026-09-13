@@ -1,5 +1,5 @@
 """
-Custom Crosswords Daily — backend API
+TopiCross — backend API
 
 Endpoints:
   POST /signup             { "email": str, "password": str }
@@ -44,7 +44,7 @@ import auth
 import database
 from database import get_db, User, SolveRecord, AnonymousUsage
 
-app = FastAPI(title="Custom Crosswords Daily API")
+app = FastAPI(title="TopiCross API")
 
 app.add_middleware(
     CORSMiddleware,

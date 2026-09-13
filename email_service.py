@@ -68,7 +68,7 @@ def send_reset_email(to_email: str, reset_link: str) -> bool:
         json={
             "from": from_address,
             "to": [to_email],
-            "subject": "Reset your Custom Crosswords Daily password",
+            "subject": "Reset your TopiCross password",
             "html": (
                 f"<p>Someone requested a password reset for this account. "
                 f"If that was you, click below:</p>"
