@@ -1,0 +1,21 @@
+{
+  "name": "TopiCross",
+  "short_name": "TopiCross",
+  "description": "Crossword puzzles generated on any topic you want, plus a real daily puzzle grounded in history.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F5F1E8",
+  "theme_color": "#152A47",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
