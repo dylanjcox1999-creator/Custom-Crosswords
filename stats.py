@@ -11,6 +11,7 @@ zero out at midnight before they've had a chance to keep it going.
 """
 import datetime
 from collections import Counter
+from zoneinfo import ZoneInfo
 
 
 def compute_streaks(solve_dates: set) -> tuple:
@@ -34,7 +35,12 @@ def compute_streaks(solve_dates: set) -> tuple:
         else:
             run = 1
 
-    today = datetime.date.today()
+    # Central Time, not server-local (Render runs in UTC) -- same reasoning
+    # as usage_limits.py and main.py's /on_this_day: a streak should break
+    # or hold based on the same real-world "today" a US user actually
+    # experiences, not UTC midnight (which would credit or break a streak
+    # up to several hours off from the user's own day boundary).
+    today = datetime.datetime.now(ZoneInfo("America/Chicago")).date()
     yesterday = today - datetime.timedelta(days=1)
     if today not in solve_dates and yesterday not in solve_dates:
         return 0, longest

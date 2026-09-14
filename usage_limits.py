@@ -63,6 +63,19 @@ trivially bypassed by switching networks, which would defeat the point of
 a cost control even more than a resettable daily trial did.
 """
 import datetime
+from zoneinfo import ZoneInfo
+
+
+def _central_today() -> datetime.date:
+    """'Today' in Central Time, not server-local (Render runs in UTC).
+    Used everywhere a daily reset boundary matters -- generation caps,
+    reword caps, and (for audit-log consistency, even though it's not
+    used to decide a reset there) the anonymous trial timestamp -- so
+    every date-based limit in this file rolls over at the same real-world
+    moment as the daily puzzle in main.py's /on_this_day, rather than at
+    UTC midnight (which was silently resetting free-tier limits mid-
+    afternoon/evening for US users instead of at midnight for anyone)."""
+    return datetime.datetime.now(ZoneInfo("America/Chicago")).date()
 
 FREE_TIER_GENERATE_DAILY_LIMIT = 1
 FREE_TIER_REWORD_DAILY_LIMIT = 3
@@ -129,7 +142,7 @@ def check_and_increment_usage(user) -> int:
     is_paid = user.tier == "paid"
     limit = PAID_TIER_GENERATE_DAILY_LIMIT if is_paid else FREE_TIER_GENERATE_DAILY_LIMIT
 
-    today = datetime.date.today()
+    today = _central_today()
     if user.daily_premium_actions_date != today:
         user.daily_premium_actions_used = 0
         user.daily_premium_actions_date = today
@@ -155,7 +168,7 @@ def check_and_increment_reword_usage(user) -> int:
     is_paid = user.tier == "paid"
     limit = PAID_TIER_REWORD_DAILY_LIMIT if is_paid else FREE_TIER_REWORD_DAILY_LIMIT
 
-    today = datetime.date.today()
+    today = _central_today()
     if user.daily_reword_date != today:
         user.daily_reword_used = 0
         user.daily_reword_date = today
@@ -185,5 +198,5 @@ def check_and_increment_anonymous_usage(anon_usage) -> int:
         raise UsageLimitExceeded(ANONYMOUS_TRIAL_LIFETIME_LIMIT, is_anonymous=True)
 
     anon_usage.daily_actions_used += 1
-    anon_usage.daily_actions_date = datetime.date.today()  # audit timestamp only
+    anon_usage.daily_actions_date = _central_today()  # audit timestamp only
     return ANONYMOUS_TRIAL_LIFETIME_LIMIT - anon_usage.daily_actions_used

@@ -12,11 +12,22 @@ running this on your own machine.
 """
 import os
 import datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Boolean, Date, DateTime, ForeignKey
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+
+
+def _central_today() -> datetime.date:
+    """'Today' in Central Time, not server-local (Render runs in UTC).
+    Used as the default for daily-reset date columns below, so a brand
+    new row starts out already consistent with how usage_limits.py and
+    stats.py interpret "today" everywhere else -- without this, a user
+    who signs up late at night Central but after UTC midnight would get
+    stamped with the wrong day from the very first row."""
+    return datetime.datetime.now(ZoneInfo("America/Chicago")).date()
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./local_dev.db")
 
@@ -86,7 +97,7 @@ class User(Base):
     # single pool shared with reword; kept as-is for schema stability
     # rather than renaming an existing column, but it's generate-only now.
     daily_premium_actions_used = Column(Integer, default=0, nullable=False)
-    daily_premium_actions_date = Column(Date, default=lambda: datetime.date.today(), nullable=False)
+    daily_premium_actions_date = Column(Date, default=_central_today, nullable=False)
 
     # Separate daily cap for /reword_clue (free tier only). Split out from
     # the generate cap above on purpose: reword has no anonymous-trial
@@ -94,7 +105,7 @@ class User(Base):
     # independent daily allowance rather than sharing one pool with
     # generation -- see usage_limits.py for the full reasoning.
     daily_reword_used = Column(Integer, default=0, nullable=False)
-    daily_reword_date = Column(Date, default=lambda: datetime.date.today(), nullable=False)
+    daily_reword_date = Column(Date, default=_central_today, nullable=False)
 
     # Password reset support. We store a HASH of the reset token, never
     # the raw token itself -- same principle as password_hash: if the
@@ -148,7 +159,7 @@ class AnonymousUsage(Base):
 
     anon_id = Column(String, primary_key=True)
     daily_actions_used = Column(Integer, default=0, nullable=False)
-    daily_actions_date = Column(Date, default=lambda: datetime.date.today(), nullable=False)
+    daily_actions_date = Column(Date, default=_central_today, nullable=False)
 
 
 def init_db():
