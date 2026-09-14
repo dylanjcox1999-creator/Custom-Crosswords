@@ -192,9 +192,40 @@
     cursor: pointer;
   }
   .topic-chip:hover { background: var(--gold); color: white; }
+
+  /* ---- Print grid feature ----
+     #print-area holds a SEPARATE, blank-cell rendering of whichever
+     puzzle was last printed -- built fresh from puzzle data, not from
+     the live interactive grid's current input values, since the point
+     is to print a blank puzzle to solve on paper, not a snapshot of
+     mid-solve progress. Hidden on screen; the @media print block below
+     hides everything else and shows only this. */
+  #print-area { display: none; }
+  #print-area .print-title { font-size: 1.3em; font-weight: bold; margin-bottom: 4px; }
+  #print-area .print-grid { display: grid; gap: 0; margin: 12px 0; border-left: 2px solid #000; border-top: 2px solid #000; width: fit-content; }
+  #print-area .print-cell {
+    width: 28px; height: 28px; border-right: 2px solid #000; border-bottom: 2px solid #000;
+    position: relative; background: #fff;
+  }
+  #print-area .print-cell.block { background: #000; }
+  #print-area .print-cell .print-num { position: absolute; top: 0; left: 2px; font-size: 8px; }
+  #print-area .print-clues { display: flex; gap: 40px; margin-top: 16px; }
+  #print-area .print-clue-col h3 { margin-bottom: 6px; }
+  #print-area .print-clue-col div { margin-bottom: 4px; font-size: 0.9em; }
+
+  @media print {
+    body * { visibility: hidden; }
+    #print-area, #print-area * { visibility: visible; }
+    #print-area {
+      display: block;
+      position: absolute; top: 0; left: 0; width: 100%;
+    }
+  }
 </style>
 </head>
+
 <body>
+<div id="print-area"></div>
 
 <h1>TopiCross</h1>
 <div class="subtitle">Live prototype — topic-to-puzzle generation + today's real "On This Day" puzzle</div>
@@ -267,6 +298,11 @@
 <div class="section">
   <h2>💳 Billing</h2>
   <div id="billing-status">Log in to manage billing.</div>
+</div>
+
+<div class="section">
+  <h2>🔥 Streak</h2>
+  <div id="streak-status">Log in to see your streak.</div>
 </div>
 
 <div class="section">
@@ -388,6 +424,7 @@ function setAuth(token, email, displayName) {
   localStorage.setItem('cc_auth_display_name', authDisplayName);
   updateAuthUI();
   refreshTierStatus();
+  refreshStreakStatus();
 }
 
 function doLogout() {
@@ -400,6 +437,7 @@ function doLogout() {
   localStorage.removeItem('cc_auth_display_name');
   updateAuthUI();
   document.getElementById('billing-status').textContent = 'Log in to manage billing.';
+  document.getElementById('streak-status').textContent = 'Log in to see your streak.';
   document.getElementById('auth-status').textContent = 'Logged out.';
 }
 
@@ -445,6 +483,64 @@ async function refreshTierStatus() {
     }
   } catch (e) {
     el.textContent = "Couldn't load billing status (backend may still be waking up -- try again shortly).";
+  }
+}
+
+// ---------- Streak (free for all logged-in users -- see /streak's
+// docstring in main.py for why this is free while the full Stats
+// Dashboard below stays paid-only) ----------
+let currentStreakData = null; // { current_streak, longest_streak }
+
+async function refreshStreakStatus() {
+  const el = document.getElementById('streak-status');
+  if (!authToken) {
+    el.textContent = 'Log in to see your streak.';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/streak`, {
+      headers: { 'Authorization': `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+    currentStreakData = await res.json();
+    if (currentStreakData.current_streak > 0) {
+      el.innerHTML = `🔥 <b>${currentStreakData.current_streak} day${currentStreakData.current_streak === 1 ? '' : 's'}</b> ` +
+        `(longest: ${currentStreakData.longest_streak}) ` +
+        '<button onclick="shareStreak()">Share</button>';
+    } else {
+      el.textContent = 'No active streak yet -- solve a puzzle today to start one!';
+    }
+  } catch (e) {
+    el.textContent = "Couldn't load streak (backend may still be waking up -- try again shortly).";
+  }
+}
+
+async function shareStreak() {
+  if (!currentStreakData || currentStreakData.current_streak <= 0) return;
+  const n = currentStreakData.current_streak;
+  const text = `🔥 I'm on a ${n} day streak on TopiCross — daily crosswords generated on any topic you want. Can you beat it?`;
+  const url = 'https://topicross.app';
+  // Web Share API opens the device's native share sheet (Messages, etc.)
+  // where available -- mainly mobile browsers. Falls back to copying
+  // text to the clipboard on desktop/unsupported browsers, since there's
+  // no share sheet to open there.
+  if (navigator.share) {
+    try {
+      await navigator.share({ text, url });
+    } catch (e) {
+      // User cancelled the share sheet -- not an error, do nothing.
+    }
+  } else {
+    try {
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      const el = document.getElementById('streak-status');
+      const original = el.innerHTML;
+      el.textContent = '📋 Copied to clipboard!';
+      setTimeout(() => { el.innerHTML = original; }, 2000);
+    } catch (e) {
+      alert(`${text} ${url}`);
+    }
   }
 }
 
@@ -752,7 +848,15 @@ async function submitSolveToBackend(topic, solveTimeSeconds, hintsUsed, complete
     throw new Error('session expired -- please log in again');
   }
   if (!res.ok) throw new Error(`Backend returned ${res.status}`);
-  return await res.json();
+  const result = await res.json();
+  if (completed) {
+    // Refresh the streak display so a just-completed puzzle is reflected
+    // immediately, not just on next page load. Fire-and-forget -- a
+    // failure here shouldn't affect the solve submission itself, which
+    // already succeeded.
+    refreshStreakStatus().catch(() => {});
+  }
+  return result;
 }
 
 // ---------- On This Day seed data (verified via search, not AI-generated) ----------
@@ -1013,6 +1117,12 @@ function renderPuzzle(containerId, puzzle, topic) {
   };
   container.appendChild(checkBtn);
 
+  const printBtn = document.createElement('button');
+  printBtn.textContent = '🖨 Print blank puzzle';
+  printBtn.style.marginLeft = '8px';
+  printBtn.onclick = () => printBlankPuzzle(puzzle, topic);
+  container.appendChild(printBtn);
+
   const clues = document.createElement('div');
   clues.className = 'clues';
   const across = puzzle.placed.filter(p => p.dir === 'A').sort((a,b) => a.num - b.num);
@@ -1158,6 +1268,82 @@ function renderPuzzle(containerId, puzzle, topic) {
   container.appendChild(clues);
 }
 
+// Builds a blank (no filled-in answers) print-friendly rendering of a
+// puzzle into #print-area, then opens the browser's print dialog.
+// Deliberately built fresh from puzzle data rather than reading the live
+// interactive grid's current <input> values -- printing is meant to
+// produce a blank puzzle to solve on paper, not a snapshot of whatever
+// progress happens to be filled in on screen at the moment you click.
+function printBlankPuzzle(puzzle, topic) {
+  const printArea = document.getElementById('print-area');
+  printArea.innerHTML = '';
+
+  const title = document.createElement('div');
+  title.className = 'print-title';
+  title.textContent = `TopiCross — ${topic.replace(/_/g, ' ')}`;
+  printArea.appendChild(title);
+
+  const blockSet = new Set();
+  for (let r = 0; r < puzzle.height; r++) {
+    for (let c = 0; c < puzzle.width; c++) {
+      blockSet.add(r + ',' + c); // start everything blocked, un-block placed cells below
+    }
+  }
+  const numMap = {};
+  puzzle.placed.forEach(p => {
+    numMap[p.row + ',' + p.col] = p.num;
+    const dr = p.dir === 'D' ? 1 : 0, dc = p.dir === 'A' ? 1 : 0;
+    for (let i = 0; i < p.word.length; i++) {
+      blockSet.delete((p.row + dr * i) + ',' + (p.col + dc * i));
+    }
+  });
+
+  const grid = document.createElement('div');
+  grid.className = 'print-grid';
+  grid.style.gridTemplateColumns = `repeat(${puzzle.width}, 28px)`;
+  grid.style.gridTemplateRows = `repeat(${puzzle.height}, 28px)`;
+  for (let r = 0; r < puzzle.height; r++) {
+    for (let c = 0; c < puzzle.width; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'print-cell';
+      const key = r + ',' + c;
+      if (blockSet.has(key)) {
+        cell.classList.add('block');
+      } else if (numMap[key]) {
+        const num = document.createElement('span');
+        num.className = 'print-num';
+        num.textContent = numMap[key];
+        cell.appendChild(num);
+      }
+      grid.appendChild(cell);
+    }
+  }
+  printArea.appendChild(grid);
+
+  const across = puzzle.placed.filter(p => p.dir === 'A').sort((a, b) => a.num - b.num);
+  const down = puzzle.placed.filter(p => p.dir === 'D').sort((a, b) => a.num - b.num);
+  const cluesWrap = document.createElement('div');
+  cluesWrap.className = 'print-clues';
+  function printClueCol(label, items) {
+    const col = document.createElement('div');
+    col.className = 'print-clue-col';
+    const h3 = document.createElement('h3');
+    h3.textContent = label;
+    col.appendChild(h3);
+    items.forEach(p => {
+      const line = document.createElement('div');
+      line.textContent = `${p.num}. ${p.clue}`;
+      col.appendChild(line);
+    });
+    return col;
+  }
+  cluesWrap.appendChild(printClueCol('Across', across));
+  cluesWrap.appendChild(printClueCol('Down', down));
+  printArea.appendChild(cluesWrap);
+
+  window.print();
+}
+
 // ---------- On This Day puzzle ----------
 // Calls the backend's real /on_this_day endpoint (today's actual date,
 // pulling live Wikipedia data grounded through Claude) with a fallback to
@@ -1209,6 +1395,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (authToken) {
     await refreshTierStatus();
+    await refreshStreakStatus();
   }
 
   // Returning from Stripe Checkout. The webhook that actually flips the

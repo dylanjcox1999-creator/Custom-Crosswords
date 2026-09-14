@@ -24,6 +24,7 @@ import os
 import hmac
 import traceback
 import datetime
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
@@ -46,7 +47,7 @@ from usage_limits import (
     check_and_increment_usage, check_and_increment_reword_usage,
     check_and_increment_anonymous_usage, UsageLimitExceeded,
 )
-from stats import build_stats
+from stats import build_stats, compute_streaks
 import auth
 import database
 from database import get_db, User, SolveRecord, AnonymousUsage
@@ -768,7 +769,15 @@ def on_this_day(date: Optional[str] = None):
         except ValueError:
             raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
     else:
-        target_date = datetime.date.today()
+        # Deliberately Central Time, not server-local (which on Render is
+        # UTC) -- with plain date.today(), the "daily" puzzle rolled over
+        # for US users mid-afternoon/evening their time (UTC midnight is
+        # 7pm Eastern / 4pm Pacific the PREVIOUS day), not at midnight for
+        # anyone. Central is a fixed, shared rollover for all users --
+        # same puzzle, same moment, everyone -- the same model NYT/Wordle
+        # use, chosen deliberately over true per-user local time so two
+        # people can actually compare notes on "today's puzzle."
+        target_date = datetime.datetime.now(ZoneInfo("America/Chicago")).date()
 
     events = get_events_for_date(target_date)
     if not events:
@@ -969,6 +978,34 @@ def get_stats(
         for r in records
     ]
     return build_stats(record_dicts)
+
+
+@app.get("/streak")
+def get_streak(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Free for every logged-in user, unlike /stats above -- deliberately
+    a much smaller slice of the same underlying data. The full dashboard
+    (favorite topics, averages, difficulty breakdown, recent activity)
+    stays a paid feature exactly as it was; only the bare streak COUNT is
+    pulled out and given away free, because it works better as a growth
+    hook (something worth sharing/bragging about, the same way Duolingo
+    and Wordle show streaks to everyone) than as a locked perk. This does
+    not reduce what paying users get -- /stats is untouched -- it just
+    also surfaces one specific number to free users for a different
+    reason than the dashboard exists for.
+    """
+    records = db.query(SolveRecord).filter(
+        SolveRecord.user_id == current_user.id,
+        SolveRecord.completed == True,  # noqa: E712 -- SQLAlchemy filter, not a Python bool check
+    ).all()
+    solve_dates = {r.logged_at.date() for r in records}
+    current_streak, longest_streak = compute_streaks(solve_dates)
+    return {
+        "current_streak": current_streak,
+        "longest_streak": longest_streak,
+    }
 
 
 @app.get("/health")
