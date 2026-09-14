@@ -41,7 +41,7 @@ from historical_events import get_events_for_date
 from hints import get_hint, VALID_TIERS
 from topic_recommender import recommend_topics
 from clue_rewriter import reword_clue
-from email_service import send_reset_email
+from email_service import send_reset_email, send_welcome_email
 import stripe_service
 from usage_limits import (
     check_and_increment_usage, check_and_increment_reword_usage,
@@ -305,6 +305,16 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
     db.refresh(user)
 
     token = auth.create_access_token(user_id=user.id, email=user.email)
+
+    try:
+        send_welcome_email(user.email, _effective_display_name(user), bonus_generations=bonus_granted)
+    except Exception as e:
+        # Same reasoning as forgot_password's send_reset_email call below:
+        # a failed send (e.g. Resend rejects it, or isn't configured yet)
+        # should never block account creation or change the response --
+        # log it for whoever's watching, that's it.
+        print(f"[signup] send_welcome_email failed for {user.email}: {e}")
+
     return {
         "access_token": token, "token_type": "bearer",
         "email": user.email, "display_name": _effective_display_name(user),

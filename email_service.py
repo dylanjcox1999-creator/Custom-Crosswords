@@ -81,3 +81,61 @@ def send_reset_email(to_email: str, reset_link: str) -> bool:
     )
     response.raise_for_status()  # raises if Resend rejects the request (e.g. 403)
     return True
+
+
+def send_welcome_email(to_email: str, display_name: str, bonus_generations: int = 0) -> bool:
+    """
+    Attempts to send a welcome email via Resend right after signup.
+    Returns True if actually sent, False if it fell through to the
+    log-only fallback (no RESEND_API_KEY configured) -- same honest-
+    fallback shape as send_reset_email above, for the same reason: this
+    is a nice-to-have, not something that should ever block or fail a
+    signup if email delivery has a problem (see how /signup in main.py
+    calls this -- wrapped in try/except, failure only logged).
+
+    Unlike the reset email, there's no security-sensitive content here
+    (no token, no link that grants access) -- purely a courtesy message,
+    so a failed send is lower-stakes than a failed reset email, but
+    still handled the same way for consistency.
+    """
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        print(
+            f"[WELCOME EMAIL -- NO EMAIL SERVICE CONFIGURED] "
+            f"Would have welcomed {to_email} ({display_name}). "
+            f"This was printed instead of emailed -- see email_service.py."
+        )
+        return False
+
+    from_address = os.environ.get("RESEND_FROM_ADDRESS", "onboarding@resend.dev")
+
+    bonus_line = (
+        f"<p>As a bonus, {bonus_generations} free puzzle generation"
+        f"{'s' if bonus_generations != 1 else ''} carried over from your "
+        f"trial straight into your new account.</p>"
+        if bonus_generations > 0 else ""
+    )
+
+    response = requests.post(
+        RESEND_API_URL,
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={
+            "from": from_address,
+            "to": [to_email],
+            "subject": "Welcome to TopiCross",
+            "html": (
+                f"<p>Hi {display_name},</p>"
+                f"<p>Welcome to TopiCross -- crossword puzzles generated on "
+                f"any topic you want, plus a real daily puzzle grounded in "
+                f"actual historical events.</p>"
+                f"{bonus_line}"
+                f"<p>Jump back in any time at "
+                f"<a href='https://topicross.app'>topicross.app</a>.</p>"
+                f"<p>Questions or feedback? Just reply to this email, or "
+                f"reach us at support@topicross.app.</p>"
+            ),
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    return True
