@@ -516,7 +516,14 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid Stripe signature.")
 
     event_type = event["type"]
-    data = event["data"]["object"]
+    # stripe-python v15+ removed dict inheritance from StripeObject
+    # entirely -- .get() (and .keys()/.items()/etc.) no longer work on
+    # ANY Stripe object, only subscript access ([...]) and attribute
+    # access do. This was the actual cause of the original 500: every
+    # .get() call below used to throw AttributeError: get. Converting
+    # to a real dict here, once, means the rest of this function can
+    # keep using .get() normally instead of rewriting every line.
+    data = event["data"]["object"].to_dict()
 
     # Everything below was previously unguarded -- any exception in here
     # (bad data shape, a DB error, anything) propagated up as a bare 500
@@ -586,7 +593,17 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         traceback.print_exc()
-        print(f"[stripe_webhook] Unhandled error processing {event_type} (event {event.get('id')}): {e}")
+        # This logging block is deliberately defensive -- it previously
+        # threw its OWN exception (event.get('id') isn't supported on
+        # Stripe's Event object, only subscript access is) which masked
+        # the actual original error this handler exists to surface.
+        # Wrapped in its own try/except now so a logging quirk can never
+        # again hide the real problem.
+        try:
+            event_id = event["id"]
+        except Exception:
+            event_id = "unknown"
+        print(f"[stripe_webhook] Unhandled error processing {event_type} (event {event_id}): {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal error processing {event_type} -- see server logs.",
