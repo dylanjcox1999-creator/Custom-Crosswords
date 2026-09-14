@@ -604,8 +604,7 @@ async function refreshStreakStatus() {
           '<div class="stat-card"><div class="stat-num">' + currentStreakData.longest_streak + '</div>' +
             '<div class="stat-label">Longest streak</div></div>' +
         '</div>' +
-        '<button onclick="shareStreak()">Share your streak</button> ' +
-        '<button onclick="textStreak()">Text it</button>';
+        '<button onclick="shareStreak()">Share your streak</button>';
     } else {
       el.textContent = 'No active streak yet -- solve a puzzle today to start one!';
     }
@@ -645,20 +644,6 @@ async function shareStreak() {
       alert(`${text} ${url}`);
     }
   }
-}
-
-function textStreak() {
-  if (!currentStreakData || currentStreakData.current_streak <= 0) return;
-  const { text, url } = buildStreakShareText();
-  const body = encodeURIComponent(`${text} ${url}`);
-  // No phone number to pre-fill (the whole point is letting them pick
-  // who to send it to from their own contacts) -- just the message body.
-  // iOS and Android disagree on the separator for that case (Android
-  // wants ?body=, iOS wants &body=) with no reliable way to detect which
-  // from JS alone, so the standard workaround is including both in one
-  // URL -- each OS just reads the one it recognizes and ignores the
-  // other, rather than erroring on the unknown one.
-  window.location.href = `sms:?body=${body}&body=${body}`;
 }
 
 async function startCheckout() {
