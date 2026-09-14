@@ -1233,7 +1233,14 @@ function renderPuzzle(containerId, puzzle, topic) {
       const line = document.createElement('div');
       line.className = 'clue-line';
       const text = document.createElement('div');
-      text.innerHTML = `<b>${p.num}.</b> <span class="clue-body">${p.clue}</span>`;
+      const numEl = document.createElement('b');
+      numEl.textContent = `${p.num}.`;
+      const clueTextEl = document.createElement('span');
+      clueTextEl.className = 'clue-body';
+      clueTextEl.textContent = p.clue;
+      text.appendChild(numEl);
+      text.appendChild(document.createTextNode(' '));
+      text.appendChild(clueTextEl);
       const btnGroup = document.createElement('div');
       btnGroup.style.display = 'flex';
       btnGroup.style.gap = '4px';
