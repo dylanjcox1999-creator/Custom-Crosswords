@@ -3,52 +3,65 @@
 <head>
 <meta charset="UTF-8">
 <title>TopiCross</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
 <style>
   :root {
     --navy: #152A47;
     --gold: #B08D57;
     --cream: #F5F1E8;
     --green: #1F3B2C;
+    --ink: #1C1C1A;
+    --paper: #FBF9F4;
+    --rule: rgba(176, 141, 87, 0.35);
   }
   * { box-sizing: border-box; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
     background: var(--cream);
-    color: #222;
+    color: var(--ink);
     margin: 0;
-    padding: 20px;
+    padding: 24px 20px 60px;
     max-width: 720px;
     margin: 0 auto;
   }
   h1 {
+    font-family: 'Fraunces', Georgia, serif;
+    font-optical-sizing: auto;
+    font-weight: 600;
     color: var(--navy);
-    font-size: 1.5em;
+    font-size: 2.1em;
+    letter-spacing: -0.01em;
     text-align: center;
-    margin-bottom: 4px;
+    margin: 4px 0 2px;
   }
   .subtitle {
     text-align: center;
-    color: #666;
+    color: #6b6558;
     font-size: 0.85em;
-    margin-bottom: 24px;
+    margin-bottom: 28px;
   }
   .section {
-    background: white;
-    border-radius: 12px;
-    padding: 18px;
-    margin-bottom: 20px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    background: var(--paper);
+    border-radius: 3px;
+    border-top: 3px solid var(--gold);
+    padding: 20px 18px;
+    margin-bottom: 22px;
   }
   .section h2 {
+    font-family: 'Fraunces', Georgia, serif;
+    font-weight: 600;
     color: var(--navy);
-    font-size: 1.1em;
+    font-size: 1.25em;
     margin-top: 0;
-    border-bottom: 2px solid var(--gold);
-    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 10px;
+    margin-bottom: 14px;
   }
   .note {
     font-size: 0.78em;
-    color: #888;
+    color: #857f70;
     font-style: italic;
     margin-top: 6px;
   }
@@ -60,22 +73,27 @@
   input[type=text] {
     flex: 1;
     padding: 10px 12px;
-    border: 1px solid #ccc;
-    border-radius: 8px;
+    border: 1px solid #d8d0bc;
+    border-radius: 4px;
+    background: white;
     font-size: 1em;
+    color: var(--ink);
   }
+  input[type=text]:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
   button {
     background: var(--navy);
     color: white;
     border: none;
     padding: 10px 18px;
-    border-radius: 8px;
+    border-radius: 4px;
     font-size: 0.95em;
+    font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
   }
-  button:disabled { background: #999; cursor: default; }
+  button:disabled { background: #b7b2a4; cursor: default; }
   button:hover:not(:disabled) { background: #1e3a5f; }
+  button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
   .status {
     font-size: 0.85em;
     color: var(--navy);
@@ -91,8 +109,8 @@
   .grid {
     display: grid;
     gap: 1px;
-    background: #333;
-    border: 2px solid #333;
+    background: var(--ink);
+    border: 2px solid var(--ink);
   }
   .cell {
     position: relative;
@@ -100,7 +118,7 @@
     height: 30px;
     background: white;
   }
-  .cell.blocked { background: #333; }
+  .cell.blocked { background: var(--ink); }
   .cell input {
     width: 100%;
     height: 100%;
@@ -111,6 +129,7 @@
     font-weight: 600;
     padding: 0;
     background: transparent;
+    color: var(--ink);
   }
   .cell input:focus { outline: 2px solid var(--gold); outline-offset: -2px; }
   .cell .num {
@@ -118,7 +137,7 @@
     top: 1px;
     left: 2px;
     font-size: 8px;
-    color: #555;
+    color: #777;
     pointer-events: none;
   }
   .cell.correct input { background: #d9f2d9; }
@@ -131,11 +150,13 @@
   }
   .clue-col { flex: 1; min-width: 200px; }
   .clue-col h3 {
+    font-family: 'Fraunces', Georgia, serif;
+    font-weight: 600;
     color: var(--gold);
-    font-size: 0.9em;
-    margin-bottom: 6px;
+    font-size: 1em;
+    margin-bottom: 8px;
   }
-  .clue-col div { font-size: 0.82em; margin-bottom: 5px; line-height: 1.3; }
+  .clue-col div { font-size: 0.82em; margin-bottom: 5px; line-height: 1.35; }
   .clue-col b { color: var(--navy); }
   .check-btn { margin-top: 10px; margin-right: 8px; }
   .timer {
@@ -146,7 +167,7 @@
     background: var(--cream);
     display: inline-block;
     padding: 6px 14px;
-    border-radius: 8px;
+    border-radius: 4px;
     margin-bottom: 10px;
     margin-right: 10px;
   }
@@ -169,8 +190,9 @@
     background: var(--gold);
     color: white;
     border: none;
-    border-radius: 5px;
+    border-radius: 4px;
     font-size: 0.7em;
+    font-weight: 600;
     padding: 3px 8px;
     cursor: pointer;
     white-space: nowrap;
@@ -183,7 +205,7 @@
     margin: 2px 0 6px 0;
   }
   .topic-chip {
-    background: var(--tan, #f0e6d2);
+    background: white;
     border: 1px solid var(--gold);
     color: var(--navy);
     padding: 6px 12px;
@@ -326,15 +348,15 @@
 
 <style>
   .stat-card {
-    background: var(--cream, #F5F1E8);
+    background: white;
     border: 1px solid var(--gold);
-    border-radius: 10px;
+    border-radius: 4px;
     padding: 10px 14px;
     text-align: center;
     min-width: 80px;
   }
-  .stat-num { font-size: 1.4em; font-weight: 700; color: var(--navy); }
-  .stat-label { font-size: 0.7em; color: #666; }
+  .stat-num { font-family: 'Fraunces', Georgia, serif; font-size: 1.5em; font-weight: 600; color: var(--navy); }
+  .stat-label { font-size: 0.7em; color: #857f70; }
 </style>
 
 <div class="section">
