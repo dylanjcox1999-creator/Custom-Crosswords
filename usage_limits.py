@@ -8,10 +8,30 @@ Usage caps across three tiers of access:
   Free account: /generate_puzzle capped at 1/day, /reword_clue capped at
     3/day -- two INDEPENDENT pools, not shared. Both reset daily.
 
-  Paid account ("tier" == "paid" on the user row): unlimited on both.
-    Nothing here processes payment -- this only enforces a limit based on
-    whatever `tier` value is already stored on the user, same as a real
-    billing integration would set it.
+  Paid account ("tier" == "paid" on the user row): a much higher daily
+    cap than free (see PAID_TIER_* below), not truly infinite. This
+    isn't a marketing "unlimited" walked back -- see the note below the
+    constants for why a real, generous ceiling still matters even on a
+    paid plan.
+
+Why paid isn't truly uncapped: each generation/reword call costs real
+money (a Claude API call). At the free-tier cost per call, a genuinely
+engaged subscriber's realistic monthly usage costs pennies -- pricing a
+subscription against that is easy. What's NOT bounded without a real cap
+is a compromised paid account, a scripted/automated abuser, or someone
+stress-testing the API key itself: with a literal -1-means-infinite
+check, nothing stops thousands of calls in a day. The caps below
+(PAID_TIER_GENERATE_DAILY_LIMIT / PAID_TIER_REWORD_DAILY_LIMIT) are set
+far above any plausible real usage -- a real subscriber generating one
+puzzle every 30-45 minutes non-stop, all day, every day, still wouldn't
+hit them -- so this is a background abuse safeguard, not a feature
+anyone should ever see a countdown for. The success path deliberately
+still returns the same -1 "unlimited" sentinel to the frontend for paid
+users (see check_and_increment_usage below) specifically so normal
+subscribers never see any counter or "X remaining" messaging -- only
+someone who actually hits this ceiling sees anything different, and the
+message they get explicitly says so rather than showing the standard
+"upgrade" prompt a free user would see.
 
 Why reword has no anonymous access and a separate, more generous free
 allowance than generation: generation is the core, expensive, headline
@@ -48,19 +68,40 @@ FREE_TIER_GENERATE_DAILY_LIMIT = 1
 FREE_TIER_REWORD_DAILY_LIMIT = 3
 ANONYMOUS_TRIAL_LIFETIME_LIMIT = 3
 
+# Fair-use ceiling for paid accounts -- see the module docstring above for
+# why this exists despite paid being marketed as "unlimited". Deliberately
+# generous: 25 generations/day is one roughly every 30-45 minutes of a
+# waking day, every single day, with zero rest days -- no real subscriber
+# should ever come close to this.
+PAID_TIER_GENERATE_DAILY_LIMIT = 25
+PAID_TIER_REWORD_DAILY_LIMIT = 60
+
 
 class UsageLimitExceeded(Exception):
-    """Raised when a free-tier user (or anonymous visitor) has hit their
-    cap for the action they're attempting."""
-    def __init__(self, limit: int, is_anonymous: bool = False, action: str = "generation"):
+    """Raised when a user (free, paid, or anonymous) has hit their cap
+    for the action they're attempting."""
+    def __init__(self, limit: int, is_anonymous: bool = False, action: str = "generation", is_paid_fair_use: bool = False):
         self.limit = limit
         self.is_anonymous = is_anonymous
+        self.is_paid_fair_use = is_paid_fair_use
         if is_anonymous:
             msg = (
                 f"You've used all {limit} of your free trial generations. "
                 f"Sign up for a free account to get a fresh generation every "
                 f"day, plus access to Reword -- unlike the trial, a free "
                 f"account's allowance actually renews."
+            )
+        elif is_paid_fair_use:
+            # Deliberately NOT the same message as the free-tier cap --
+            # this user is already paying, so "upgrade" would be a
+            # confusing, wrong thing to tell them.
+            msg = (
+                f"You've hit today's fair-use limit of {limit} {action}s for "
+                f"paid accounts -- this is a high ceiling meant to catch "
+                f"automated/unusual activity, not normal use. It resets at "
+                f"midnight; if you're hitting this during genuine everyday "
+                f"use, contact support, this limit is meant to be raised "
+                f"for a real case like that, not to cap you."
             )
         else:
             msg = (
@@ -74,26 +115,33 @@ def check_and_increment_usage(user) -> int:
     """
     Call this before performing /generate_puzzle for a LOGGED-IN user.
     Resets the daily counter if the stored date isn't today, then either
-    increments and allows the action, or raises UsageLimitExceeded if the
-    free-tier generate cap is already hit.
+    increments and allows the action, or raises UsageLimitExceeded if
+    this user's tier-appropriate generate cap is already hit.
 
     Mutates `user` in place (caller commits the session afterward) and
-    returns the number of free generations remaining today AFTER this
-    action.
+    returns the number of generations remaining today AFTER this action
+    for a free user, or -1 (the "effectively unlimited" sentinel the
+    frontend already expects) for a paid user who's still under the
+    fair-use ceiling -- paid users only ever see a real number if they
+    actually hit that ceiling, via the exception message above, not via
+    this return value.
     """
-    if user.tier == "paid":
-        return -1  # sentinel meaning "unlimited", not a real count
+    is_paid = user.tier == "paid"
+    limit = PAID_TIER_GENERATE_DAILY_LIMIT if is_paid else FREE_TIER_GENERATE_DAILY_LIMIT
 
     today = datetime.date.today()
     if user.daily_premium_actions_date != today:
         user.daily_premium_actions_used = 0
         user.daily_premium_actions_date = today
 
-    if user.daily_premium_actions_used >= FREE_TIER_GENERATE_DAILY_LIMIT:
-        raise UsageLimitExceeded(FREE_TIER_GENERATE_DAILY_LIMIT, action="generation")
+    if user.daily_premium_actions_used >= limit:
+        raise UsageLimitExceeded(limit, action="generation", is_paid_fair_use=is_paid)
 
     user.daily_premium_actions_used += 1
-    return FREE_TIER_GENERATE_DAILY_LIMIT - user.daily_premium_actions_used
+
+    if is_paid:
+        return -1
+    return limit - user.daily_premium_actions_used
 
 
 def check_and_increment_reword_usage(user) -> int:
@@ -104,19 +152,22 @@ def check_and_increment_reword_usage(user) -> int:
     that by requiring login on this endpoint, not by calling this
     function with no user).
     """
-    if user.tier == "paid":
-        return -1
+    is_paid = user.tier == "paid"
+    limit = PAID_TIER_REWORD_DAILY_LIMIT if is_paid else FREE_TIER_REWORD_DAILY_LIMIT
 
     today = datetime.date.today()
     if user.daily_reword_date != today:
         user.daily_reword_used = 0
         user.daily_reword_date = today
 
-    if user.daily_reword_used >= FREE_TIER_REWORD_DAILY_LIMIT:
-        raise UsageLimitExceeded(FREE_TIER_REWORD_DAILY_LIMIT, action="reword")
+    if user.daily_reword_used >= limit:
+        raise UsageLimitExceeded(limit, action="reword", is_paid_fair_use=is_paid)
 
     user.daily_reword_used += 1
-    return FREE_TIER_REWORD_DAILY_LIMIT - user.daily_reword_used
+
+    if is_paid:
+        return -1
+    return limit - user.daily_reword_used
 
 
 def check_and_increment_anonymous_usage(anon_usage) -> int:
