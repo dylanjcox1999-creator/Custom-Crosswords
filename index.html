@@ -273,7 +273,7 @@
 <div id="print-area"></div>
 
 <h1>TopiCross</h1>
-<div class="subtitle">Live prototype — topic-to-puzzle generation + today's real "On This Day" puzzle</div>
+<div class="subtitle">Crossword puzzles generated on any topic you want, plus today's real "On This Day" puzzle</div>
 <div style="text-align:center; margin-bottom: 18px;">
   <span id="backend-indicator" class="backend-status offline">Backend: checking...</span>
 </div>
@@ -413,16 +413,16 @@
   <div id="topic-suggestions" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
   <div id="custom-status" class="status">Enter any topic and tap Generate.</div>
   <div id="custom-grid-container"></div>
-  <div class="note">Calls your backend's <code>/generate_puzzle</code>, which asks Claude for a word bank server-side (your API key never touches the browser) and runs it through your real generator2.py compaction pipeline — not a simplified approximation. Requires the backend to be running.</div>
-  <div class="note">"Recommend for me" calls <code>/recommend_difficulty</code>, personalized to your own solve-time and hint-usage history for this topic (requires login).</div>
-  <div class="note">"Suggest topics for me" calls <code>/recommend_topics</code>, which looks at what you've played before and suggests new, related topics via Claude -- or a diverse starter set if you're new or not logged in.</div>
+  <div class="note">Your topic is sent securely to generate a real, solvable puzzle -- not a simplified approximation.</div>
+  <div class="note">"Recommend for me" suggests a difficulty based on your own solve-time and hint-usage history for this topic (requires login).</div>
+  <div class="note">"Suggest topics for me" looks at what you've played before and suggests new, related topics -- or a diverse starter set if you're new or not logged in.</div>
 </div>
 
 <div class="section">
   <h2 id="otd-title">📅 On This Day</h2>
   <div id="otd-status" class="status">Ready.</div>
   <div id="otd-grid-container"></div>
-  <div class="note">Seeded from verified historical events for today's date (Jamestown, Battle of Lake Erie, Elias Howe's sewing machine patent, and more). In production this pulls from a maintained historical-events database each day rather than being hardcoded like this demo.</div>
+  <div class="note">Seeded from verified historical events for today's date.</div>
 </div>
 
 <script>
@@ -563,7 +563,7 @@ async function refreshTierStatus() {
         '<button onclick="startCheckout()">Upgrade to Paid</button>';
     }
   } catch (e) {
-    el.textContent = "Couldn't load billing status (backend may still be waking up -- try again shortly).";
+    el.textContent = "Couldn't load billing status -- please try again shortly.";
   }
 }
 
@@ -598,7 +598,7 @@ async function refreshStreakStatus() {
       el.textContent = 'No active streak yet -- solve a puzzle today to start one!';
     }
   } catch (e) {
-    el.textContent = "Couldn't load streak (backend may still be waking up -- try again shortly).";
+    el.textContent = "Couldn't load streak -- please try again shortly.";
   }
 }
 
@@ -875,7 +875,7 @@ async function checkBackendHealth() {
     const res = await fetch(`${API_BASE_URL}/health`, { signal: AbortSignal.timeout(2000) });
     if (res.ok) {
       backendAvailable = true;
-      indicator.textContent = 'Backend: connected (hints & solve-tracking are live)';
+      indicator.textContent = 'Connected';
       indicator.className = 'backend-status connected';
       return;
     }
@@ -890,14 +890,14 @@ async function checkBackendHealth() {
   // whole session even once the instance finishes waking up. Retry
   // once with a much longer timeout, showing a clear waking-up state
   // in the meantime.
-  indicator.textContent = 'Backend: waking up (free tier can take up to a minute)...';
+  indicator.textContent = 'Getting things ready (may take up to a minute)...';
   indicator.className = 'backend-status offline';
 
   try {
     const res = await fetch(`${API_BASE_URL}/health`, { signal: AbortSignal.timeout(60000) });
     if (res.ok) {
       backendAvailable = true;
-      indicator.textContent = 'Backend: connected (hints & solve-tracking are live)';
+      indicator.textContent = 'Connected';
       indicator.className = 'backend-status connected';
       return;
     }
@@ -906,7 +906,7 @@ async function checkBackendHealth() {
   }
 
   backendAvailable = false;
-  indicator.textContent = 'Backend: not running — using local fallback (see README to start it)';
+  indicator.textContent = "Having trouble connecting -- some features may be limited right now.";
   indicator.className = 'backend-status offline';
 }
 
@@ -1261,7 +1261,7 @@ function renderPuzzle(containerId, puzzle, topic) {
             h = await fetchHintFromBackend(p.word, tierToUse);
           } catch (e) {
             h = getHintLocal(p.word, tierToUse);
-            h.text += ' (local fallback -- backend call failed)';
+            h.text += '';
           }
         } else {
           h = getHintLocal(p.word, tierToUse);
@@ -1296,7 +1296,7 @@ function renderPuzzle(containerId, puzzle, topic) {
         }
         if (!backendAvailable) {
           hintTextEl.style.display = 'block';
-          hintTextEl.textContent = '⚠ Rewording a clue needs the backend running -- no local fallback for this one (it genuinely needs Claude to rephrase).';
+          hintTextEl.textContent = '⚠ Rewording needs a live connection -- please try again in a moment.';
           return;
         }
         if (!authToken) {
@@ -1460,7 +1460,7 @@ async function loadOnThisDayPuzzle() {
         renderPuzzle('otd-grid-container', puzzle, 'on_this_day_' + data.date);
         const niceDate = new Date(data.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
         titleEl.textContent = `📅 On This Day — ${niceDate}`;
-        statusEl.textContent = `Placed ${puzzle.placed.length} of ${data.word_bank_used ? data.word_bank_used.length : puzzle.placed.length} words for ${data.date} (live from your backend).`;
+        statusEl.textContent = `Placed ${puzzle.placed.length} of ${data.word_bank_used ? data.word_bank_used.length : puzzle.placed.length} words for ${data.date}.`;
         return;
       }
       // fall through to local fallback on a non-OK response (e.g. no data yet for today)
@@ -1472,10 +1472,10 @@ async function loadOnThisDayPuzzle() {
   // Local fallback: the one hardcoded, verified sample (September 10)
   const puzzle = buildCrossword(OTD_WORDS);
   renderPuzzle('otd-grid-container', puzzle, 'on_this_day_fallback_sept_10');
-  titleEl.textContent = '📅 On This Day — September 10 (fallback sample)';
+  titleEl.textContent = '📅 On This Day — September 10 (sample puzzle)';
   statusEl.textContent =
     `Placed ${puzzle.placed.length} of ${OTD_WORDS.length} words. ` +
-    `(Local fallback for September 10 -- backend unavailable or has no data for today yet.)`;
+    `(Showing a sample puzzle -- today's couldn't be loaded right now.)`;
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
@@ -1725,14 +1725,13 @@ async function generateCustomPuzzle() {
   }
   if (!backendAvailable) {
     statusEl.textContent =
-      '⚠ Backend not connected. Custom topic generation needs your backend running ' +
-      '(uvicorn main:app) so your Anthropic API key stays server-side. See backend/README.md.';
+      '⚠ Not connected right now -- please try again in a moment.';
     return;
   }
 
   btn.disabled = true;
   statusEl.textContent = authToken
-    ? `Asking your backend to generate a ${difficulty} puzzle for "${topic}"...`
+    ? `Generating a ${difficulty} puzzle for "${topic}"...`
     : `Generating your free trial puzzle for "${topic}"...`;
   document.getElementById('custom-grid-container').innerHTML = '';
 
@@ -1772,7 +1771,7 @@ async function generateCustomPuzzle() {
       : '';
     statusEl.textContent =
       `Placed ${puzzle.placed.length} of ${data.word_bank_used.length} words for "${topic}" ` +
-      `(${difficulty}, via your real generator2.py engine).${remainingNote}`;
+      `(${difficulty}).${remainingNote}`;
   } catch (err) {
     statusEl.textContent = 'Error generating puzzle: ' + err.message;
   } finally {
