@@ -355,7 +355,7 @@
   <h2>🔥 Streak</h2>
   <div class="tabs">
     <button class="tab-btn active" id="tab-btn-streak" onclick="switchStreakTab('streak')">Streak</button>
-    <button class="tab-btn" id="tab-btn-stats" onclick="switchStreakTab('stats')">Full Stats <span style="font-size:0.85em; color: var(--gold);">(paid)</span></button>
+    <button class="tab-btn" id="tab-btn-stats" onclick="switchStreakTab('stats')">Full Stats</button>
   </div>
 
   <div id="streak-tab-streak">
@@ -363,7 +363,6 @@
   </div>
 
   <div id="streak-tab-stats" style="display:none;">
-    <button onclick="loadStats()">View My Stats</button>
     <div id="stats-status" class="status"></div>
     <div id="stats-content" style="display:none;">
       <div style="display:flex; flex-wrap:wrap; gap:10px; margin: 12px 0;">
@@ -481,6 +480,7 @@ function switchStreakTab(tab) {
   statsPanel.style.display = showStats ? 'block' : 'none';
   streakBtn.classList.toggle('active', !showStats);
   statsBtn.classList.toggle('active', showStats);
+  if (showStats) loadStats();
 }
 
 function updateAuthUI() {
@@ -1586,8 +1586,9 @@ async function loadStats() {
       throw new Error('session expired -- please log in again');
     }
     if (res.status === 403) {
-      const errBody = await res.json().catch(() => ({}));
-      statusEl.textContent = '🔒 ' + (errBody.detail || 'Stats dashboard is a paid feature.');
+      statusEl.innerHTML = '🔒 Upgrade to premium to see your full stats breakdown -- solve history, ' +
+        'favorite topics, difficulty trends, and more. ' +
+        '<button onclick="switchAccountTab(\'billing\'); document.getElementById(\'auth-section\').scrollIntoView({behavior:\'smooth\'});">Upgrade</button>';
       return;
     }
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
