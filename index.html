@@ -215,6 +215,29 @@
   }
   .topic-chip:hover { background: var(--gold); color: white; }
 
+  .account-tabs {
+    display: flex;
+    gap: 22px;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 16px;
+  }
+  .account-tab-btn {
+    background: none;
+    color: #857f70;
+    border: none;
+    border-radius: 0;
+    padding: 6px 0 10px;
+    font-size: 0.95em;
+    font-weight: 600;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .account-tab-btn:hover:not(:disabled) { background: none; color: var(--navy); }
+  .account-tab-btn.active {
+    color: var(--navy);
+    border-bottom: 2px solid var(--gold);
+  }
+
   /* ---- Print grid feature ----
      #print-area holds a SEPARATE, blank-cell rendering of whichever
      puzzle was last printed -- built fresh from puzzle data, not from
@@ -257,6 +280,12 @@
 
 <div class="section" id="auth-section">
   <h2>👤 Account</h2>
+  <div class="account-tabs">
+    <button class="account-tab-btn active" id="tab-btn-profile" onclick="switchAccountTab('profile')">Profile</button>
+    <button class="account-tab-btn" id="tab-btn-billing" onclick="switchAccountTab('billing')">Billing</button>
+  </div>
+
+  <div id="account-tab-profile">
   <div id="logged-out-view">
     <div class="topic-input-row">
       <input type="text" id="auth-email" placeholder="email" autocomplete="username">
@@ -306,6 +335,11 @@
   <div id="auth-status" class="status"></div>
   <div class="note">Login is only needed to save solve history and get personalized difficulty recommendations. Generating and playing puzzles works without an account.</div>
   <div class="note">Display name is what's shown instead of your email -- falls back to the part before "@" if you don't set one. Can be changed anytime once logged in.</div>
+  </div>
+
+  <div id="account-tab-billing" style="display:none;">
+    <div id="billing-status">Log in to manage billing.</div>
+  </div>
 </div>
 
 <div class="section" id="reset-password-section" style="display:none;">
@@ -315,11 +349,6 @@
     <button onclick="doResetPassword()">Set New Password</button>
   </div>
   <div id="reset-password-status" class="status"></div>
-</div>
-
-<div class="section">
-  <h2>💳 Billing</h2>
-  <div id="billing-status">Log in to manage billing.</div>
 </div>
 
 <div class="section">
@@ -423,6 +452,18 @@ function getOrCreateAnonymousId() {
   return id;
 }
 const anonymousId = getOrCreateAnonymousId();
+
+function switchAccountTab(tab) {
+  const profilePanel = document.getElementById('account-tab-profile');
+  const billingPanel = document.getElementById('account-tab-billing');
+  const profileBtn = document.getElementById('tab-btn-profile');
+  const billingBtn = document.getElementById('tab-btn-billing');
+  const showBilling = (tab === 'billing');
+  profilePanel.style.display = showBilling ? 'none' : 'block';
+  billingPanel.style.display = showBilling ? 'block' : 'none';
+  profileBtn.classList.toggle('active', !showBilling);
+  billingBtn.classList.toggle('active', showBilling);
+}
 
 function updateAuthUI() {
   const loggedOut = document.getElementById('logged-out-view');
