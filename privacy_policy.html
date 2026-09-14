@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Privacy Policy — Custom Crosswords Daily</title>
+<title>Privacy Policy — TopiCross</title>
 <style>
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
@@ -33,7 +33,7 @@
 <body>
 
 <h1>Privacy Policy</h1>
-<div class="updated">Last updated: [DATE -- fill in before publishing]</div>
+<div class="updated">Last updated: September 13, 2026</div>
 
 <div class="draft-notice">
   <b>⚠ Draft notice:</b> This document was drafted to accurately reflect what this specific application actually does with user data, but it is a starting point, not a finished legal document. It has not been reviewed by an attorney. Before relying on this for a real product with real users -- especially once payment processing is added -- have it reviewed by a lawyer familiar with privacy law in the jurisdictions your users are in (this matters a lot: GDPR for EU users, CCPA for California users, and others have specific, non-optional requirements this draft does not fully address).
@@ -46,6 +46,7 @@
   <li><b>Password</b> -- never stored in plain text. We store a salted, one-way cryptographic hash (PBKDF2) that cannot be reversed to recover your actual password, even by us.</li>
   <li><b>Display name</b> (optional) -- shown in place of your email in the app if you set one.</li>
   <li><b>Solve history</b> -- which puzzle topics you've played, difficulty level, how long puzzles took you, how many hints you used, and whether you completed each puzzle. This is used to power personalized difficulty and topic recommendations, and the stats dashboard.</li>
+  <li><b>Billing/subscription status</b> -- if you subscribe to paid access, we store a reference to your Stripe customer and subscription record (an ID, not your card number or other payment details) so we know your account is paid. Your card details are collected and stored by Stripe directly -- see "Stripe" below.</li>
 </ul>
 <p>If you use the app without an account (the free trial):</p>
 <ul>
@@ -62,6 +63,8 @@
 <p>We don't sell your data. We do use the following services to actually run the app, each of which may process data as part of providing that infrastructure:</p>
 <ul>
   <li><b>Anthropic</b> -- generates puzzle content from the topics you provide (see above)</li>
+  <li><b>Stripe</b> -- processes payment if you subscribe to paid access. Stripe receives your email address and payment details directly to do this; we never see, receive, or store your card number. See <a href="https://stripe.com/privacy" target="_blank">Stripe's own privacy policy</a> for how they handle this.</li>
+  <li><b>Resend</b> -- sends account-related emails on our behalf (currently, password-reset emails). Resend receives your email address and the content of that specific email in order to deliver it.</li>
   <li><b>A hosted database provider</b> (Supabase or Neon, depending on current configuration) -- stores account and solve-history data</li>
   <li><b>Render</b> -- hosts the backend server that processes your requests</li>
   <li><b>GitHub Pages</b> -- hosts the web page you're using right now</li>
@@ -74,10 +77,10 @@
   <li><b>Correction</b> of inaccurate data (e.g. updating your display name, which you can already do directly in the app)</li>
   <li><b>Deletion</b> of your account and associated data</li>
 </ul>
-<p><b>Currently, deletion requests must be handled manually</b> -- there is not yet a self-service "delete my account" button in the app. If you'd like your account and data deleted, contact us at <span class="placeholder">[CONTACT EMAIL -- fill in]</span> and we will process the request. We're aware this should eventually be a self-service feature and consider it a known gap.</p>
+<p><b>Deletion</b> is self-service: use "Delete my account" in the app (under your account settings), confirm your password, and your account and all associated solve history are permanently deleted immediately. If you have an active paid subscription, deleting your account also cancels it immediately as part of the same action -- see the Terms of Service for what this means for billing.</p>
 
 <h2>Children's privacy</h2>
-<p>This service is not directed at children under 13, and we do not knowingly collect personal information from children under 13. We do not currently verify the age of users at signup. If you believe a child has provided us with personal information, contact us at <span class="placeholder">[CONTACT EMAIL]</span> and we will delete it.</p>
+<p>This service is not directed at children under 13, and we do not knowingly collect personal information from children under 13. We do not currently verify the age of users at signup. If you believe a child has provided us with personal information, contact us at <a href="mailto:support@topicross.app">support@topicross.app</a> and we will delete it.</p>
 
 <h2>Data retention</h2>
 <p>We retain your account data for as long as your account is active. Solve history is retained to power personalization features; you may request its deletion at any time using the contact method above.</p>
@@ -89,7 +92,7 @@
 <p>We may update this policy as the service changes. Material changes will be reflected by updating the "Last updated" date above.</p>
 
 <h2>Contact</h2>
-<p>Questions about this policy or your data: <span class="placeholder">[CONTACT EMAIL -- fill in]</span></p>
+<p>Questions about this policy or your data: <a href="mailto:support@topicross.app">support@topicross.app</a></p>
 
 </body>
 </html>
