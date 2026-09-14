@@ -46,6 +46,7 @@ import stripe_service
 from usage_limits import (
     check_and_increment_usage, check_and_increment_reword_usage,
     check_and_increment_anonymous_usage, UsageLimitExceeded,
+    ANONYMOUS_TRIAL_LIFETIME_LIMIT,
 )
 from stats import build_stats, compute_streaks
 import auth
@@ -104,6 +105,12 @@ class SignupRequest(BaseModel):
     email: str
     password: str
     display_name: Optional[str] = None
+    # Optional: the browser's anonymous trial ID (from localStorage), if
+    # any -- sent so any unused anonymous trial credits can be merged
+    # into this new account as a one-time bonus. See User.
+    # bonus_generations_remaining's comment in database.py for why this
+    # merge needs to exist at all.
+    anon_id: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -277,6 +284,22 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
 
     user = User(email=email, password_hash=auth.hash_password(req.password), display_name=display_name)
+
+    # Merge any unused anonymous trial credits into this new account as a
+    # one-time bonus -- see bonus_generations_remaining's comment in
+    # database.py for why this exists. The anon_id row itself is left
+    # alone (not deleted or zeroed): if this same browser later logs out,
+    # it should NOT get a second trial from the same anon_id -- but it
+    # also shouldn't get punished beyond what it already had, so simply
+    # not touching the row (rather than maxing it out) is the smallest
+    # correct change here.
+    bonus_granted = 0
+    if req.anon_id:
+        anon_usage = db.query(AnonymousUsage).filter(AnonymousUsage.anon_id == req.anon_id).first()
+        if anon_usage:
+            bonus_granted = max(0, ANONYMOUS_TRIAL_LIFETIME_LIMIT - anon_usage.daily_actions_used)
+            user.bonus_generations_remaining = bonus_granted
+
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -286,6 +309,7 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
         "access_token": token, "token_type": "bearer",
         "email": user.email, "display_name": _effective_display_name(user),
         "tier": user.tier,
+        "bonus_generations_granted": bonus_granted,
     }
 
 

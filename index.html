@@ -819,14 +819,19 @@ async function doSignup() {
       'Please check the box agreeing to the Terms of Service and Privacy Policy to sign up.';
     return;
   }
-  await authRequest('/signup', 'Account created and logged in.', displayName || null);
+  // Send the browser's anonymous trial ID along so any unused anonymous
+  // trial credits get merged into the new account as a one-time bonus,
+  // instead of silently disappearing the moment someone becomes a
+  // logged-in user (see bonus_generations_remaining's comment in
+  // database.py for the full reasoning).
+  await authRequest('/signup', 'Account created and logged in.', displayName || null, anonymousId);
 }
 
 async function doLogin() {
   await authRequest('/login', 'Logged in.', null);
 }
 
-async function authRequest(path, successMessage, displayName) {
+async function authRequest(path, successMessage, displayName, anonId) {
   const email = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
   const statusEl = document.getElementById('auth-status');
@@ -841,6 +846,7 @@ async function authRequest(path, successMessage, displayName) {
   statusEl.textContent = 'Working...';
   const body = { email, password };
   if (displayName) body.display_name = displayName;
+  if (anonId) body.anon_id = anonId;
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, {
       method: 'POST',
@@ -851,7 +857,10 @@ async function authRequest(path, successMessage, displayName) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
     setAuth(data.access_token, data.email, data.display_name);
-    statusEl.textContent = successMessage;
+    statusEl.textContent = (data.bonus_generations_granted > 0)
+      ? `${successMessage} 🎉 Plus, ${data.bonus_generations_granted} bonus generation` +
+        `${data.bonus_generations_granted === 1 ? '' : 's'} carried over from your free trial.`
+      : successMessage;
   } catch (err) {
     statusEl.textContent = 'Error: ' + err.message;
   }

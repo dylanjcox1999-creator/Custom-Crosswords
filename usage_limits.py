@@ -127,7 +127,8 @@ class UsageLimitExceeded(Exception):
 def check_and_increment_usage(user) -> int:
     """
     Call this before performing /generate_puzzle for a LOGGED-IN user.
-    Resets the daily counter if the stored date isn't today, then either
+    Resets the daily counter if the stored date isn't today, then draws
+    from any signup bonus credits first (see below), then either
     increments and allows the action, or raises UsageLimitExceeded if
     this user's tier-appropriate generate cap is already hit.
 
@@ -137,7 +138,10 @@ def check_and_increment_usage(user) -> int:
     frontend already expects) for a paid user who's still under the
     fair-use ceiling -- paid users only ever see a real number if they
     actually hit that ceiling, via the exception message above, not via
-    this return value.
+    this return value. A bonus-credit action also returns the current
+    daily-remaining count (unchanged, since bonus credits don't touch it)
+    rather than -1/some bonus-specific number, to keep this function's
+    return type simple for the caller.
     """
     is_paid = user.tier == "paid"
     limit = PAID_TIER_GENERATE_DAILY_LIMIT if is_paid else FREE_TIER_GENERATE_DAILY_LIMIT
@@ -146,6 +150,16 @@ def check_and_increment_usage(user) -> int:
     if user.daily_premium_actions_date != today:
         user.daily_premium_actions_used = 0
         user.daily_premium_actions_date = today
+
+    # Bonus credits (merged in at signup from an unused anonymous trial --
+    # see bonus_generations_remaining's comment in database.py) are spent
+    # FIRST and don't touch the daily counter at all -- a true one-time
+    # top-up on top of the daily allowance, not folded into it. Only
+    # relevant for free-tier users; paid accounts already have a much
+    # higher cap and have no real use for it.
+    if not is_paid and user.bonus_generations_remaining > 0:
+        user.bonus_generations_remaining -= 1
+        return limit - user.daily_premium_actions_used
 
     if user.daily_premium_actions_used >= limit:
         raise UsageLimitExceeded(limit, action="generation", is_paid_fair_use=is_paid)

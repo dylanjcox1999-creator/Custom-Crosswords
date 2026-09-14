@@ -67,6 +67,20 @@ class User(Base):
     # admin tool (e.g. for comping a user), independent of Stripe.
     tier = Column(String, default="free", nullable=False)
 
+    # One-time bonus generations, separate from and consumed BEFORE the
+    # daily free-tier cap in usage_limits.py's check_and_increment_usage.
+    # Exists to fix a real gap: /generate_puzzle's logged-in-vs-anonymous
+    # check is an either/or (see _check_usage_for_request in main.py) --
+    # once authenticated, a user's remaining anonymous trial credits
+    # (ANONYMOUS_TRIAL_LIFETIME_LIMIT) become permanently unreachable,
+    # meaning someone who signs up BEFORE using their free trial loses
+    # those credits entirely, while someone who plays anonymously first
+    # and signs up after keeps what they used. That's backwards -- signing
+    # up should never leave someone worse off. /signup merges any unused
+    # anonymous credits (looked up by the anon_id the frontend still has
+    # in localStorage) into this field as a welcome bonus.
+    bonus_generations_remaining = Column(Integer, default=0, nullable=False)
+
     # Stripe's customer object ID for this user. Created lazily on first
     # checkout attempt (see stripe_service.get_or_create_customer) and
     # reused after that -- NOT the same as the subscription ID, since a
