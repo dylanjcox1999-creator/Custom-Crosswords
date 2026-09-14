@@ -22,6 +22,7 @@ Run locally:
 """
 import os
 import hmac
+import traceback
 import datetime
 from typing import Optional
 
@@ -517,61 +518,79 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     event_type = event["type"]
     data = event["data"]["object"]
 
-    if event_type == "checkout.session.completed":
-        # A subscription checkout just finished successfully. The
-        # subscription ID is on the session for subscription-mode
-        # checkouts. Look the user up by client_reference_id (set to
-        # our own user.id when the session was created) rather than by
-        # email, since that's an unambiguous, unspoofable link back to
-        # exactly the user who started this checkout.
-        user_id = data.get("client_reference_id")
-        subscription_id = data.get("subscription")
-        if user_id:
-            user = db.query(User).filter(User.id == int(user_id)).first()
+    # Everything below was previously unguarded -- any exception in here
+    # (bad data shape, a DB error, anything) propagated up as a bare 500
+    # with NOTHING useful in the logs beyond "500 happened". Wrapping it
+    # means a failure is actually diagnosable next time instead of a
+    # dead end. Still re-raises as a 500 afterward (not swallowed) so
+    # Stripe's automatic retry logic still kicks in -- this only adds
+    # visibility, it doesn't change whether Stripe considers this a
+    # failed delivery.
+    try:
+        if event_type == "checkout.session.completed":
+            # A subscription checkout just finished successfully. The
+            # subscription ID is on the session for subscription-mode
+            # checkouts. Look the user up by client_reference_id (set to
+            # our own user.id when the session was created) rather than by
+            # email, since that's an unambiguous, unspoofable link back to
+            # exactly the user who started this checkout.
+            user_id = data.get("client_reference_id")
+            subscription_id = data.get("subscription")
+            if user_id:
+                user = db.query(User).filter(User.id == int(user_id)).first()
+                if user:
+                    user.tier = "paid"
+                    user.stripe_subscription_id = subscription_id
+                    db.add(user)
+                    db.commit()
+
+        elif event_type == "customer.subscription.updated":
+            # Covers e.g. a past-due subscription recovering after a retried
+            # payment, or a plan change. "active" and "trialing" both count
+            # as paid access; anything else (past_due, unpaid, incomplete,
+            # incomplete_expired) does not.
+            customer_id = data.get("customer")
+            status = data.get("status")
+            user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
             if user:
-                user.tier = "paid"
-                user.stripe_subscription_id = subscription_id
+                user.tier = "paid" if status in ("active", "trialing") else "free"
                 db.add(user)
                 db.commit()
 
-    elif event_type == "customer.subscription.updated":
-        # Covers e.g. a past-due subscription recovering after a retried
-        # payment, or a plan change. "active" and "trialing" both count
-        # as paid access; anything else (past_due, unpaid, incomplete,
-        # incomplete_expired) does not.
-        customer_id = data.get("customer")
-        status = data.get("status")
-        user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
-        if user:
-            user.tier = "paid" if status in ("active", "trialing") else "free"
-            db.add(user)
-            db.commit()
+        elif event_type == "customer.subscription.deleted":
+            # Subscription fully canceled (not just past-due) -- revoke
+            # paid access and clear the subscription ID so a future
+            # checkout doesn't get blocked by the "already subscribed"
+            # check in /create_checkout_session above.
+            customer_id = data.get("customer")
+            user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+            if user:
+                user.tier = "free"
+                user.stripe_subscription_id = None
+                db.add(user)
+                db.commit()
 
-    elif event_type == "customer.subscription.deleted":
-        # Subscription fully canceled (not just past-due) -- revoke
-        # paid access and clear the subscription ID so a future
-        # checkout doesn't get blocked by the "already subscribed"
-        # check in /create_checkout_session above.
-        customer_id = data.get("customer")
-        user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
-        if user:
-            user.tier = "free"
-            user.stripe_subscription_id = None
-            db.add(user)
-            db.commit()
+        elif event_type == "invoice.payment_failed":
+            # Don't immediately revoke access on the FIRST failed payment --
+            # Stripe automatically retries a few times over about two weeks
+            # (Smart Retries) before giving up, and customer.subscription.
+            # updated will fire with status="past_due" or eventually
+            # "unpaid"/"canceled" if all retries fail, which the handler
+            # above already covers. Immediately cutting access on the first
+            # failure would punish a user for a temporarily-declined card
+            # that recovers on retry. This branch exists mainly so the event
+            # type is acknowledged (200) rather than landing in Stripe's
+            # dashboard as an unhandled event; log it for visibility.
+            print(f"[stripe_webhook] invoice.payment_failed for customer {data.get('customer')}")
 
-    elif event_type == "invoice.payment_failed":
-        # Don't immediately revoke access on the FIRST failed payment --
-        # Stripe automatically retries a few times over about two weeks
-        # (Smart Retries) before giving up, and customer.subscription.
-        # updated will fire with status="past_due" or eventually
-        # "unpaid"/"canceled" if all retries fail, which the handler
-        # above already covers. Immediately cutting access on the first
-        # failure would punish a user for a temporarily-declined card
-        # that recovers on retry. This branch exists mainly so the event
-        # type is acknowledged (200) rather than landing in Stripe's
-        # dashboard as an unhandled event; log it for visibility.
-        print(f"[stripe_webhook] invoice.payment_failed for customer {data.get('customer')}")
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        print(f"[stripe_webhook] Unhandled error processing {event_type} (event {event.get('id')}): {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal error processing {event_type} -- see server logs.",
+        )
 
     return {"received": True}
 

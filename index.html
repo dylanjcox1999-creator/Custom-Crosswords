@@ -1204,9 +1204,28 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (checkoutResult === 'success' && authToken) {
     const billingEl = document.getElementById('billing-status');
     billingEl.textContent = 'Finalizing your subscription...';
-    for (let attempt = 0; attempt < 5 && currentTier !== 'paid'; attempt++) {
-      await new Promise(r => setTimeout(r, 2000));
+    // Match the same cold-start ceiling as checkBackendHealth() -- if the
+    // Render instance was asleep when Stripe's webhook arrived, it can
+    // take up to ~60s to wake up and process it. 10 seconds (the old
+    // 5x2s loop) wasn't enough and made a successful-but-slow webhook
+    // look like a failed upgrade.
+    let confirmed = false;
+    for (let attempt = 0; attempt < 20 && !confirmed; attempt++) {
+      await new Promise(r => setTimeout(r, 3000));
       await refreshTierStatus();
+      confirmed = (currentTier === 'paid');
+    }
+    if (!confirmed) {
+      // Deliberately NOT the normal "you're on the free plan, upgrade"
+      // message -- a real subscription may well exist on Stripe's side
+      // and just be slow to sync, so telling them to upgrade again would
+      // be actively wrong. Give them a manual re-check instead of
+      // silently reverting to the upsell state.
+      billingEl.innerHTML =
+        "⚠ Checkout completed, but we're still waiting to hear back from Stripe " +
+        "-- this can happen if our server was asleep when the confirmation arrived. " +
+        "Your card was only charged if the subscription actually went through. " +
+        '<button onclick="refreshTierStatus()">Check again</button>';
     }
   } else if (checkoutResult === 'cancelled') {
     document.getElementById('billing-status').textContent =
