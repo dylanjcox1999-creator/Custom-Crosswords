@@ -215,13 +215,13 @@
   }
   .topic-chip:hover { background: var(--gold); color: white; }
 
-  .account-tabs {
+  .tabs {
     display: flex;
     gap: 22px;
     border-bottom: 1px solid var(--rule);
     margin-bottom: 16px;
   }
-  .account-tab-btn {
+  .tab-btn {
     background: none;
     color: #857f70;
     border: none;
@@ -232,8 +232,8 @@
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
   }
-  .account-tab-btn:hover:not(:disabled) { background: none; color: var(--navy); }
-  .account-tab-btn.active {
+  .tab-btn:hover:not(:disabled) { background: none; color: var(--navy); }
+  .tab-btn.active {
     color: var(--navy);
     border-bottom: 2px solid var(--gold);
   }
@@ -280,9 +280,9 @@
 
 <div class="section" id="auth-section">
   <h2>👤 Account</h2>
-  <div class="account-tabs">
-    <button class="account-tab-btn active" id="tab-btn-profile" onclick="switchAccountTab('profile')">Profile</button>
-    <button class="account-tab-btn" id="tab-btn-billing" onclick="switchAccountTab('billing')">Billing</button>
+  <div class="tabs">
+    <button class="tab-btn active" id="tab-btn-profile" onclick="switchAccountTab('profile')">Profile</button>
+    <button class="tab-btn" id="tab-btn-billing" onclick="switchAccountTab('billing')">Billing</button>
   </div>
 
   <div id="account-tab-profile">
@@ -353,25 +353,31 @@
 
 <div class="section">
   <h2>🔥 Streak</h2>
-  <div id="streak-status">Log in to see your streak.</div>
-</div>
+  <div class="tabs">
+    <button class="tab-btn active" id="tab-btn-streak" onclick="switchStreakTab('streak')">Streak</button>
+    <button class="tab-btn" id="tab-btn-stats" onclick="switchStreakTab('stats')">Full Stats <span style="font-size:0.85em; color: var(--gold);">(paid)</span></button>
+  </div>
 
-<div class="section">
-  <h2>📊 Stats Dashboard <span style="font-size:0.6em; color: var(--gold);">(paid feature)</span></h2>
-  <button onclick="loadStats()">View My Stats</button>
-  <div id="stats-status" class="status"></div>
-  <div id="stats-content" style="display:none;">
-    <div style="display:flex; flex-wrap:wrap; gap:10px; margin: 12px 0;">
-      <div class="stat-card"><div class="stat-num" id="stat-solved">-</div><div class="stat-label">Solved</div></div>
-      <div class="stat-card"><div class="stat-num" id="stat-current-streak">-</div><div class="stat-label">Current Streak</div></div>
-      <div class="stat-card"><div class="stat-num" id="stat-longest-streak">-</div><div class="stat-label">Longest Streak</div></div>
-      <div class="stat-card"><div class="stat-num" id="stat-completion">-</div><div class="stat-label">Completion Rate</div></div>
+  <div id="streak-tab-streak">
+    <div id="streak-status">Log in to see your streak.</div>
+  </div>
+
+  <div id="streak-tab-stats" style="display:none;">
+    <button onclick="loadStats()">View My Stats</button>
+    <div id="stats-status" class="status"></div>
+    <div id="stats-content" style="display:none;">
+      <div style="display:flex; flex-wrap:wrap; gap:10px; margin: 12px 0;">
+        <div class="stat-card"><div class="stat-num" id="stat-solved">-</div><div class="stat-label">Solved</div></div>
+        <div class="stat-card"><div class="stat-num" id="stat-current-streak">-</div><div class="stat-label">Current Streak</div></div>
+        <div class="stat-card"><div class="stat-num" id="stat-longest-streak">-</div><div class="stat-label">Longest Streak</div></div>
+        <div class="stat-card"><div class="stat-num" id="stat-completion">-</div><div class="stat-label">Completion Rate</div></div>
+      </div>
+      <div id="stat-fastest" style="font-size:0.85em; margin-bottom:8px;"></div>
+      <div style="font-size:0.85em;"><b>Favorite topics:</b> <span id="stat-topics"></span></div>
+      <div style="font-size:0.85em; margin-top:6px;"><b>By difficulty:</b> <span id="stat-difficulty"></span></div>
+      <div style="font-size:0.85em; margin-top:10px;"><b>Recent activity:</b></div>
+      <div id="stat-recent" style="font-size:0.8em; margin-top:4px;"></div>
     </div>
-    <div id="stat-fastest" style="font-size:0.85em; margin-bottom:8px;"></div>
-    <div style="font-size:0.85em;"><b>Favorite topics:</b> <span id="stat-topics"></span></div>
-    <div style="font-size:0.85em; margin-top:6px;"><b>By difficulty:</b> <span id="stat-difficulty"></span></div>
-    <div style="font-size:0.85em; margin-top:10px;"><b>Recent activity:</b></div>
-    <div id="stat-recent" style="font-size:0.8em; margin-top:4px;"></div>
   </div>
 </div>
 
@@ -387,13 +393,6 @@
   .stat-num { font-family: 'Fraunces', Georgia, serif; font-size: 1.5em; font-weight: 600; color: var(--navy); }
   .stat-label { font-size: 0.7em; color: #857f70; }
 </style>
-
-<div class="section">
-  <h2 id="otd-title">📅 On This Day</h2>
-  <div id="otd-status" class="status">Ready.</div>
-  <div id="otd-grid-container"></div>
-  <div class="note">Seeded from verified historical events for today's date (Jamestown, Battle of Lake Erie, Elias Howe's sewing machine patent, and more). In production this pulls from a maintained historical-events database each day rather than being hardcoded like this demo.</div>
-</div>
 
 <div class="section">
   <h2>🧩 Generate a Puzzle From Any Topic</h2>
@@ -418,6 +417,13 @@
   <div class="note">Calls your backend's <code>/generate_puzzle</code>, which asks Claude for a word bank server-side (your API key never touches the browser) and runs it through your real generator2.py compaction pipeline — not a simplified approximation. Requires the backend to be running.</div>
   <div class="note">"Recommend for me" calls <code>/recommend_difficulty</code>, personalized to your own solve-time and hint-usage history for this topic (requires login).</div>
   <div class="note">"Suggest topics for me" calls <code>/recommend_topics</code>, which looks at what you've played before and suggests new, related topics via Claude -- or a diverse starter set if you're new or not logged in.</div>
+</div>
+
+<div class="section">
+  <h2 id="otd-title">📅 On This Day</h2>
+  <div id="otd-status" class="status">Ready.</div>
+  <div id="otd-grid-container"></div>
+  <div class="note">Seeded from verified historical events for today's date (Jamestown, Battle of Lake Erie, Elias Howe's sewing machine patent, and more). In production this pulls from a maintained historical-events database each day rather than being hardcoded like this demo.</div>
 </div>
 
 <script>
@@ -463,6 +469,18 @@ function switchAccountTab(tab) {
   billingPanel.style.display = showBilling ? 'block' : 'none';
   profileBtn.classList.toggle('active', !showBilling);
   billingBtn.classList.toggle('active', showBilling);
+}
+
+function switchStreakTab(tab) {
+  const streakPanel = document.getElementById('streak-tab-streak');
+  const statsPanel = document.getElementById('streak-tab-stats');
+  const streakBtn = document.getElementById('tab-btn-streak');
+  const statsBtn = document.getElementById('tab-btn-stats');
+  const showStats = (tab === 'stats');
+  streakPanel.style.display = showStats ? 'none' : 'block';
+  statsPanel.style.display = showStats ? 'block' : 'none';
+  streakBtn.classList.toggle('active', !showStats);
+  statsBtn.classList.toggle('active', showStats);
 }
 
 function updateAuthUI() {
@@ -568,9 +586,14 @@ async function refreshStreakStatus() {
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
     currentStreakData = await res.json();
     if (currentStreakData.current_streak > 0) {
-      el.innerHTML = `🔥 <b>${currentStreakData.current_streak} day${currentStreakData.current_streak === 1 ? '' : 's'}</b> ` +
-        `(longest: ${currentStreakData.longest_streak}) ` +
-        '<button onclick="shareStreak()">Share</button>';
+      el.innerHTML =
+        '<div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom: 4px;">' +
+          '<div class="stat-card"><div class="stat-num">🔥 ' + currentStreakData.current_streak + '</div>' +
+            '<div class="stat-label">Day' + (currentStreakData.current_streak === 1 ? '' : 's') + ' current</div></div>' +
+          '<div class="stat-card"><div class="stat-num">' + currentStreakData.longest_streak + '</div>' +
+            '<div class="stat-label">Longest streak</div></div>' +
+        '</div>' +
+        '<button onclick="shareStreak()">Share your streak</button>';
     } else {
       el.textContent = 'No active streak yet -- solve a puzzle today to start one!';
     }
