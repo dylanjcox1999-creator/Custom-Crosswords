@@ -290,7 +290,12 @@
 </div>
 
 <div class="section" id="auth-section">
-  <h2>👤 Account</h2>
+  <h2 onclick="toggleAccountCollapse()" style="cursor:pointer; display:flex; align-items:center; justify-content:space-between;">
+    <span>👤 Account <span id="account-header-name" style="color: var(--gold);"></span></span>
+    <span id="account-collapse-chevron" style="font-size:0.7em; color: var(--gold);">▲</span>
+  </h2>
+
+  <div id="account-body">
   <div class="tabs">
     <button class="tab-btn active" id="tab-btn-profile" onclick="switchAccountTab('profile')">Profile</button>
     <button class="tab-btn" id="tab-btn-billing" onclick="switchAccountTab('billing')">Billing</button>
@@ -350,6 +355,7 @@
 
   <div id="account-tab-billing" style="display:none;">
     <div id="billing-status">Log in to manage billing.</div>
+  </div>
   </div>
 </div>
 
@@ -497,14 +503,27 @@ function switchStreakTab(tab) {
 function updateAuthUI() {
   const loggedOut = document.getElementById('logged-out-view');
   const loggedIn = document.getElementById('logged-in-view');
+  const headerName = document.getElementById('account-header-name');
   if (authToken) {
     loggedOut.style.display = 'none';
     loggedIn.style.display = 'block';
     document.getElementById('logged-in-email').textContent = authDisplayName || authEmail;
+    headerName.textContent = authDisplayName || authEmail;
   } else {
     loggedOut.style.display = 'block';
     loggedIn.style.display = 'none';
+    headerName.textContent = '';
   }
+}
+
+function setAccountCollapsed(collapsed) {
+  document.getElementById('account-body').style.display = collapsed ? 'none' : 'block';
+  document.getElementById('account-collapse-chevron').textContent = collapsed ? '▼' : '▲';
+}
+
+function toggleAccountCollapse() {
+  const collapsedNow = document.getElementById('account-body').style.display === 'none';
+  setAccountCollapsed(!collapsedNow);
 }
 
 function setAuth(token, email, displayName) {
@@ -517,6 +536,10 @@ function setAuth(token, email, displayName) {
   updateAuthUI();
   refreshTierStatus();
   refreshStreakStatus();
+  // Collapse the account details once logged in -- the login form and
+  // account settings aren't the main thing to look at anymore; tap the
+  // header (now showing the display name) to expand back out any time.
+  setAccountCollapsed(true);
 }
 
 function doLogout() {
@@ -531,6 +554,8 @@ function doLogout() {
   document.getElementById('billing-status').textContent = 'Log in to manage billing.';
   document.getElementById('streak-status').textContent = 'Log in to see your streak.';
   document.getElementById('auth-status').textContent = 'Logged out.';
+  // Expand again on logout -- they need to see the login form.
+  setAccountCollapsed(false);
 }
 
 // ---------- Billing (Stripe) ----------
@@ -1503,6 +1528,7 @@ async function loadOnThisDayPuzzle() {
 
 window.addEventListener('DOMContentLoaded', async () => {
   updateAuthUI();
+  setAccountCollapsed(!!authToken);
 
   // If this page was opened from a password-reset link, show the reset
   // panel instead of (well, alongside) the normal account UI.
