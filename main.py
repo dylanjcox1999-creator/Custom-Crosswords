@@ -8,6 +8,10 @@ Endpoints:
   GET  /on_this_day        ?date=YYYY-MM-DD (optional, defaults to today)
   POST /submit_solve       (requires auth) logs a per-user solve record
   GET  /recommend_difficulty?topic=...  (requires auth) per-user recommendation
+  GET  /me                  (requires auth) current user's tier/subscription status
+  POST /create_checkout_session  (requires auth) starts a Stripe subscription checkout
+  POST /billing_portal      (requires auth) Stripe billing portal (manage/cancel)
+  POST /stripe_webhook      Stripe -> us: subscription lifecycle events (not user-facing)
 
 Run locally:
   pip install -r requirements.txt
@@ -21,12 +25,13 @@ import hmac
 import datetime
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import jwt as pyjwt
+import stripe
 
 from compact_lib import compact_search
 from claude_wordbank import generate_word_bank
@@ -35,6 +40,7 @@ from hints import get_hint, VALID_TIERS
 from topic_recommender import recommend_topics
 from clue_rewriter import reword_clue
 from email_service import send_reset_email
+import stripe_service
 from usage_limits import (
     check_and_increment_usage, check_and_increment_reword_usage,
     check_and_increment_anonymous_usage, UsageLimitExceeded,
@@ -228,6 +234,7 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
     return {
         "access_token": token, "token_type": "bearer",
         "email": user.email, "display_name": _effective_display_name(user),
+        "tier": user.tier,
     }
 
 
@@ -244,6 +251,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     return {
         "access_token": token, "token_type": "bearer",
         "email": user.email, "display_name": _effective_display_name(user),
+        "tier": user.tier,
     }
 
 
@@ -356,6 +364,23 @@ def delete_account(
     if not auth.verify_password(req.password, current_user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect password.")
 
+    # Cancel any active Stripe subscription FIRST -- otherwise deleting
+    # the user row orphans a live subscription that keeps billing the
+    # user's card with no account left to apply the eventual webhook to.
+    # Best-effort: log and continue with deletion even if this fails
+    # (e.g. Stripe not configured, or already canceled), since a failed
+    # cancellation shouldn't block the user's right to delete their
+    # account -- but it does mean this needs to be visible in logs so
+    # it can be handled manually if it ever happens.
+    if current_user.stripe_subscription_id:
+        try:
+            stripe_service.cancel_subscription(current_user.stripe_subscription_id)
+        except Exception as e:
+            print(
+                f"[delete_account] Failed to cancel Stripe subscription "
+                f"{current_user.stripe_subscription_id} for user {current_user.email}: {e}"
+            )
+
     db.delete(current_user)
     db.commit()
     return {"deleted": True}
@@ -404,6 +429,151 @@ def admin_set_tier(
     db.add(user)
     db.commit()
     return {"email": user.email, "tier": user.tier, "updated": True}
+
+
+# ---------------- Billing (Stripe) ----------------
+# Real payment integration: recurring subscription via Stripe Checkout.
+# Card details never touch this backend or the frontend -- both checkout
+# and billing management happen on Stripe-hosted pages. This backend only
+# ever sees Stripe's webhook events telling it what happened, and flips
+# User.tier accordingly. See stripe_service.py's module docstring for the
+# one-time Stripe Dashboard setup this depends on.
+
+@app.get("/me")
+def get_me(current_user: User = Depends(get_current_user)):
+    """Lightweight endpoint for the frontend to check the logged-in
+    user's current tier (e.g. right after redirecting back from Stripe
+    Checkout, to see whether the webhook has flipped it yet)."""
+    return {
+        "email": current_user.email,
+        "display_name": _effective_display_name(current_user),
+        "tier": current_user.tier,
+        "has_active_subscription": current_user.stripe_subscription_id is not None,
+    }
+
+
+@app.post("/create_checkout_session")
+def create_checkout_session(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.tier == "paid" and current_user.stripe_subscription_id:
+        raise HTTPException(
+            status_code=400,
+            detail="You already have an active subscription. Use the billing portal to manage it.",
+        )
+    try:
+        url = stripe_service.create_checkout_session(current_user, db, FRONTEND_URL)
+    except RuntimeError as e:
+        # Not-yet-configured (missing env vars) -- a real setup problem,
+        # not a user-facing payment failure, so it gets a 503 rather than
+        # looking like something the user did wrong.
+        raise HTTPException(status_code=503, detail=str(e))
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=502, detail=f"Stripe error: {e.user_message or str(e)}")
+    return {"checkout_url": url}
+
+
+@app.post("/billing_portal")
+def billing_portal(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        url = stripe_service.create_billing_portal_session(current_user, FRONTEND_URL)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=502, detail=f"Stripe error: {e.user_message or str(e)}")
+    return {"portal_url": url}
+
+
+@app.post("/stripe_webhook")
+async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+    """Receives events from Stripe and updates User.tier accordingly.
+    This is the SOURCE OF TRUTH for who's paid -- not the Checkout
+    redirect, which only tells the browser the payment page closed, not
+    that the payment actually succeeded.
+
+    Must read the raw request body (not parsed JSON) for signature
+    verification -- Stripe signs the exact bytes it sent, so re-
+    serializing a parsed body would break verification.
+    """
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    try:
+        event = stripe_service.verify_webhook(payload, sig_header)
+    except RuntimeError as e:
+        # Not configured -- surfaces clearly in logs rather than a
+        # generic 500, same reasoning as the other RuntimeErrors above.
+        raise HTTPException(status_code=503, detail=str(e))
+    except stripe.error.SignatureVerificationError:
+        # Deliberately a 400, not swallowed -- an unverifiable webhook
+        # should be visible in logs (could be a misconfigured secret,
+        # or someone probing this endpoint), not silently ignored.
+        raise HTTPException(status_code=400, detail="Invalid Stripe signature.")
+
+    event_type = event["type"]
+    data = event["data"]["object"]
+
+    if event_type == "checkout.session.completed":
+        # A subscription checkout just finished successfully. The
+        # subscription ID is on the session for subscription-mode
+        # checkouts. Look the user up by client_reference_id (set to
+        # our own user.id when the session was created) rather than by
+        # email, since that's an unambiguous, unspoofable link back to
+        # exactly the user who started this checkout.
+        user_id = data.get("client_reference_id")
+        subscription_id = data.get("subscription")
+        if user_id:
+            user = db.query(User).filter(User.id == int(user_id)).first()
+            if user:
+                user.tier = "paid"
+                user.stripe_subscription_id = subscription_id
+                db.add(user)
+                db.commit()
+
+    elif event_type == "customer.subscription.updated":
+        # Covers e.g. a past-due subscription recovering after a retried
+        # payment, or a plan change. "active" and "trialing" both count
+        # as paid access; anything else (past_due, unpaid, incomplete,
+        # incomplete_expired) does not.
+        customer_id = data.get("customer")
+        status = data.get("status")
+        user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+        if user:
+            user.tier = "paid" if status in ("active", "trialing") else "free"
+            db.add(user)
+            db.commit()
+
+    elif event_type == "customer.subscription.deleted":
+        # Subscription fully canceled (not just past-due) -- revoke
+        # paid access and clear the subscription ID so a future
+        # checkout doesn't get blocked by the "already subscribed"
+        # check in /create_checkout_session above.
+        customer_id = data.get("customer")
+        user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+        if user:
+            user.tier = "free"
+            user.stripe_subscription_id = None
+            db.add(user)
+            db.commit()
+
+    elif event_type == "invoice.payment_failed":
+        # Don't immediately revoke access on the FIRST failed payment --
+        # Stripe automatically retries a few times over about two weeks
+        # (Smart Retries) before giving up, and customer.subscription.
+        # updated will fire with status="past_due" or eventually
+        # "unpaid"/"canceled" if all retries fail, which the handler
+        # above already covers. Immediately cutting access on the first
+        # failure would punish a user for a temporarily-declined card
+        # that recovers on retry. This branch exists mainly so the event
+        # type is acknowledged (200) rather than landing in Stripe's
+        # dashboard as an unhandled event; log it for visibility.
+        print(f"[stripe_webhook] invoice.payment_failed for customer {data.get('customer')}")
+
+    return {"received": True}
 
 
 # ---------------- Puzzles ----------------

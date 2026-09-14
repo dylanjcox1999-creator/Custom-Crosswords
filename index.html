@@ -265,6 +265,11 @@
 </div>
 
 <div class="section">
+  <h2>💳 Billing</h2>
+  <div id="billing-status">Log in to manage billing.</div>
+</div>
+
+<div class="section">
   <h2>📊 Stats Dashboard <span style="font-size:0.6em; color: var(--gold);">(paid feature)</span></h2>
   <button onclick="loadStats()">View My Stats</button>
   <div id="stats-status" class="status"></div>
@@ -342,6 +347,7 @@ let backendAvailable = false;
 let authToken = localStorage.getItem('cc_auth_token') || null;
 let authEmail = localStorage.getItem('cc_auth_email') || null;
 let authDisplayName = localStorage.getItem('cc_auth_display_name') || null;
+let currentTier = null; // populated by refreshTierStatus() once logged in
 
 // ---------- Anonymous trial ID ----------
 // A random ID generated once per browser, stored in localStorage, used to
@@ -381,17 +387,83 @@ function setAuth(token, email, displayName) {
   localStorage.setItem('cc_auth_email', email);
   localStorage.setItem('cc_auth_display_name', authDisplayName);
   updateAuthUI();
+  refreshTierStatus();
 }
 
 function doLogout() {
   authToken = null;
   authEmail = null;
   authDisplayName = null;
+  currentTier = null;
   localStorage.removeItem('cc_auth_token');
   localStorage.removeItem('cc_auth_email');
   localStorage.removeItem('cc_auth_display_name');
   updateAuthUI();
+  document.getElementById('billing-status').textContent = 'Log in to manage billing.';
   document.getElementById('auth-status').textContent = 'Logged out.';
+}
+
+// ---------- Billing (Stripe) ----------
+// Card details never touch this frontend -- both checkout and billing
+// management happen on Stripe-hosted pages, we just redirect to them.
+async function refreshTierStatus() {
+  const el = document.getElementById('billing-status');
+  if (!authToken) {
+    el.textContent = 'Log in to manage billing.';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/me`, {
+      headers: { 'Authorization': `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+    const data = await res.json();
+    currentTier = data.tier;
+    if (data.tier === 'paid') {
+      el.innerHTML = '✅ You\'re on the <b>paid</b> plan. ' +
+        '<button onclick="openBillingPortal()">Manage Billing</button>';
+    } else {
+      el.innerHTML = 'You\'re on the <b>free</b> plan. ' +
+        '<button onclick="startCheckout()">Upgrade to Paid</button>';
+    }
+  } catch (e) {
+    el.textContent = "Couldn't load billing status (backend may still be waking up -- try again shortly).";
+  }
+}
+
+async function startCheckout() {
+  const el = document.getElementById('billing-status');
+  el.textContent = 'Redirecting to secure checkout...';
+  try {
+    const res = await fetch(`${API_BASE_URL}/create_checkout_session`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Backend returned ${res.status}`);
+    window.location.href = data.checkout_url;
+  } catch (e) {
+    el.textContent = `⚠ Couldn't start checkout: ${e.message}`;
+  }
+}
+
+async function openBillingPortal() {
+  const el = document.getElementById('billing-status');
+  el.textContent = 'Opening billing portal...';
+  try {
+    const res = await fetch(`${API_BASE_URL}/billing_portal`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Backend returned ${res.status}`);
+    window.location.href = data.portal_url;
+  } catch (e) {
+    el.textContent = `⚠ Couldn't open billing portal: ${e.message}`;
+  }
 }
 
 async function doUpdateDisplayName() {
@@ -1117,6 +1189,35 @@ window.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   if (params.get('reset_token')) {
     document.getElementById('reset-password-section').style.display = 'block';
+  }
+
+  if (authToken) {
+    await refreshTierStatus();
+  }
+
+  // Returning from Stripe Checkout. The webhook that actually flips the
+  // tier (checkout.session.completed) can arrive slightly before or
+  // after this redirect -- so on a fresh "success", poll /me a few times
+  // a couple seconds apart rather than trusting the tier is flipped
+  // the instant we land back here.
+  const checkoutResult = params.get('checkout');
+  if (checkoutResult === 'success' && authToken) {
+    const billingEl = document.getElementById('billing-status');
+    billingEl.textContent = 'Finalizing your subscription...';
+    for (let attempt = 0; attempt < 5 && currentTier !== 'paid'; attempt++) {
+      await new Promise(r => setTimeout(r, 2000));
+      await refreshTierStatus();
+    }
+  } else if (checkoutResult === 'cancelled') {
+    document.getElementById('billing-status').textContent =
+      'Checkout cancelled -- no charge was made. You\'re still on the free plan.';
+  }
+  // Clean the ?checkout=... param out of the URL so a page refresh
+  // doesn't re-trigger this polling loop.
+  if (checkoutResult) {
+    params.delete('checkout');
+    const newUrl = window.location.pathname + (params.toString() ? `?${params}` : '');
+    window.history.replaceState({}, '', newUrl);
   }
 
   await checkBackendHealth();

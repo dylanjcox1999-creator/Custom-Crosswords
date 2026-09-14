@@ -50,10 +50,22 @@ class User(Base):
     display_name = Column(String, nullable=True)
 
     # Paid-tier support: "free" or "paid". Paid users are never limited on
-    # anything below. Nothing bills anyone yet -- this field is what a
-    # real payment integration would flip, it doesn't process payment
-    # itself.
+    # anything below. Flipped automatically by Stripe webhooks in
+    # stripe_service.py / main.py's /stripe_webhook -- see there for the
+    # full subscription lifecycle. Can also still be set manually via the
+    # admin tool (e.g. for comping a user), independent of Stripe.
     tier = Column(String, default="free", nullable=False)
+
+    # Stripe's customer object ID for this user. Created lazily on first
+    # checkout attempt (see stripe_service.get_or_create_customer) and
+    # reused after that -- NOT the same as the subscription ID, since a
+    # customer can exist (and be billed) without an active subscription.
+    stripe_customer_id = Column(String, nullable=True, index=True)
+
+    # The currently-active subscription ID, if any. Nullable: a "paid"
+    # tier set manually via the admin tool has no real Stripe subscription
+    # behind it, and a canceled subscription clears this back to None.
+    stripe_subscription_id = Column(String, nullable=True, index=True)
 
     # Daily cap for /generate_puzzle specifically (free tier only -- see
     # usage_limits.py). Named "premium_actions" from when this was a
