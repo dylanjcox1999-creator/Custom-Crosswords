@@ -210,6 +210,55 @@ def _effective_display_name(user: User) -> str:
     return user.email.split("@")[0]
 
 
+def _subscription_period_end(subscription: dict):
+    """Extracts the current billing period's end (Unix timestamp) from a
+    Stripe Subscription dict.
+
+    As of Stripe's "Basil" API version (2025-03-31) and every version
+    since, `current_period_end` no longer exists on the Subscription
+    object itself -- it moved to each individual subscription item
+    (`items.data[].current_period_end`), since a subscription can have
+    multiple items on different billing cycles. A webhook or API
+    response can still succeed and return 200 with this field simply
+    absent -- there's no exception to catch, it just silently isn't
+    there, which is exactly what happened here before this fix: the
+    webhook always returned 200, the code never errored, the value was
+    just always None.
+
+    This app only ever creates single-item subscriptions (one price per
+    checkout), so the first item's period end is unambiguous. Falls back
+    to a top-level current_period_end if one is somehow still present
+    (pre-Basil accounts), for safety rather than correctness -- shouldn't
+    matter for a sandbox created well after Basil shipped, but costs
+    nothing to check.
+    """
+    items = (subscription.get("items") or {}).get("data") or []
+    if items:
+        return items[0].get("current_period_end")
+    return subscription.get("current_period_end")
+
+
+def _subscription_will_cancel(subscription: dict) -> bool:
+    """Whether this subscription is set to end at the current period's
+    close rather than auto-renew.
+
+    Same Basil-era caution as _subscription_period_end above: Stripe
+    deprecated the `cancel_at_period_end` REQUEST parameter in favor of
+    `cancel_at` (an explicit timestamp, or the enum 'min_period_end' /
+    'max_period_end') on create/update calls. It's not fully confirmed
+    whether the boolean `cancel_at_period_end` RESPONSE field is still
+    reliably populated going forward given that shift, so this checks
+    both: the boolean if present, OR a set `cancel_at` timestamp (which
+    is what the newer parameter actually produces) as of the moment this
+    was written. Cheap to check both, and avoids silently breaking again
+    the same way current_period_end did if the boolean field is ever
+    also phased out the same way.
+    """
+    if subscription.get("cancel_at_period_end"):
+        return True
+    return subscription.get("cancel_at") is not None
+
+
 @app.post("/signup")
 def signup(req: SignupRequest, db: Session = Depends(get_db)):
     email = req.email.strip().lower()
@@ -561,8 +610,8 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     # start, not just after the first later update.
                     if subscription_id:
                         sub = stripe.Subscription.retrieve(subscription_id).to_dict()
-                        user.subscription_period_end = sub.get("current_period_end")
-                        user.subscription_cancel_at_period_end = sub.get("cancel_at_period_end", False)
+                        user.subscription_period_end = _subscription_period_end(sub)
+                        user.subscription_cancel_at_period_end = _subscription_will_cancel(sub)
                     db.add(user)
                     db.commit()
 
@@ -579,8 +628,8 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
             if user:
                 user.tier = "paid" if status in ("active", "trialing") else "free"
-                user.subscription_period_end = data.get("current_period_end")
-                user.subscription_cancel_at_period_end = data.get("cancel_at_period_end", False)
+                user.subscription_period_end = _subscription_period_end(data)
+                user.subscription_cancel_at_period_end = _subscription_will_cancel(data)
                 db.add(user)
                 db.commit()
 
