@@ -450,6 +450,12 @@ def get_me(current_user: User = Depends(get_current_user)):
         "display_name": _effective_display_name(current_user),
         "tier": current_user.tier,
         "has_active_subscription": current_user.stripe_subscription_id is not None,
+        # Unix timestamp (seconds) of when the current billing period
+        # ends, and whether it's set to cancel rather than renew at that
+        # point -- both None/False for a free user or a manually-comped
+        # paid user with no real Stripe subscription behind them.
+        "subscription_period_end": current_user.subscription_period_end,
+        "subscription_cancel_at_period_end": bool(current_user.subscription_cancel_at_period_end),
     }
 
 
@@ -548,19 +554,33 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 if user:
                     user.tier = "paid"
                     user.stripe_subscription_id = subscription_id
+                    # The Checkout Session object itself doesn't include
+                    # billing-period details (that's on the Subscription
+                    # object, not the Session) -- fetch it once here so
+                    # the frontend has a real renewal date from the
+                    # start, not just after the first later update.
+                    if subscription_id:
+                        sub = stripe.Subscription.retrieve(subscription_id).to_dict()
+                        user.subscription_period_end = sub.get("current_period_end")
+                        user.subscription_cancel_at_period_end = sub.get("cancel_at_period_end", False)
                     db.add(user)
                     db.commit()
 
         elif event_type == "customer.subscription.updated":
             # Covers e.g. a past-due subscription recovering after a retried
-            # payment, or a plan change. "active" and "trialing" both count
-            # as paid access; anything else (past_due, unpaid, incomplete,
-            # incomplete_expired) does not.
+            # payment, or a plan change -- AND a cancellation via the billing
+            # portal, which doesn't delete the subscription immediately, it
+            # just flips cancel_at_period_end to true and leaves status as
+            # "active" until the period actually ends. "active" and
+            # "trialing" both count as paid access; anything else (past_due,
+            # unpaid, incomplete, incomplete_expired) does not.
             customer_id = data.get("customer")
             status = data.get("status")
             user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
             if user:
                 user.tier = "paid" if status in ("active", "trialing") else "free"
+                user.subscription_period_end = data.get("current_period_end")
+                user.subscription_cancel_at_period_end = data.get("cancel_at_period_end", False)
                 db.add(user)
                 db.commit()
 
@@ -574,6 +594,8 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             if user:
                 user.tier = "free"
                 user.stripe_subscription_id = None
+                user.subscription_period_end = None
+                user.subscription_cancel_at_period_end = False
                 db.add(user)
                 db.commit()
 

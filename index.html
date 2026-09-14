@@ -420,7 +420,23 @@ async function refreshTierStatus() {
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
     const data = await res.json();
     currentTier = data.tier;
-    if (data.tier === 'paid') {
+    if (data.tier === 'paid' && data.subscription_cancel_at_period_end && data.subscription_period_end) {
+      // Cancelled via the billing portal, but Stripe's default flow
+      // doesn't revoke access immediately -- it just stops the NEXT
+      // renewal, so tier correctly stays "paid" through the end of the
+      // period that was already paid for. Without this branch, the UI
+      // would just silently keep saying "paid" with a "Manage Billing"
+      // button as if nothing happened, which is confusing after
+      // someone just went through the cancel flow.
+      const endDate = new Date(data.subscription_period_end * 1000);
+      const msPerDay = 24 * 60 * 60 * 1000;
+      const daysLeft = Math.max(0, Math.ceil((endDate - new Date()) / msPerDay));
+      const dateStr = endDate.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+      el.innerHTML = `⏳ Your subscription is <b>cancelled</b>, but paid access continues through ` +
+        `<b>${dateStr}</b> (${daysLeft} day${daysLeft === 1 ? '' : 's'} left). ` +
+        `You won't be charged again. ` +
+        '<button onclick="openBillingPortal()">Resubscribe / Manage</button>';
+    } else if (data.tier === 'paid') {
       el.innerHTML = '✅ You\'re on the <b>paid</b> plan. ' +
         '<button onclick="openBillingPortal()">Manage Billing</button>';
     } else {

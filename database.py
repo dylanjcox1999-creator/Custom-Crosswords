@@ -67,6 +67,20 @@ class User(Base):
     # behind it, and a canceled subscription clears this back to None.
     stripe_subscription_id = Column(String, nullable=True, index=True)
 
+    # When the current billing period ends (Unix timestamp, from Stripe's
+    # current_period_end), and whether the subscription is set to cancel
+    # at that point rather than auto-renew. Together these let the
+    # frontend show "your paid access continues until <date>" after a
+    # user cancels via the billing portal -- Stripe's default cancel flow
+    # doesn't revoke access immediately, it just stops the NEXT renewal,
+    # so `tier` correctly stays "paid" through the end of the period; these
+    # two fields are what let the UI actually communicate that instead of
+    # just silently still saying "paid" with no explanation. Populated by
+    # the checkout.session.completed and customer.subscription.updated
+    # webhook handlers in main.py; cleared on customer.subscription.deleted.
+    subscription_period_end = Column(Integer, nullable=True)
+    subscription_cancel_at_period_end = Column(Boolean, nullable=True, default=False)
+
     # Daily cap for /generate_puzzle specifically (free tier only -- see
     # usage_limits.py). Named "premium_actions" from when this was a
     # single pool shared with reword; kept as-is for schema stability
