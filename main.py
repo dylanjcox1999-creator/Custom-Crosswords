@@ -323,14 +323,56 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
     }
 
 
+FAILED_LOGIN_LOCKOUT_THRESHOLD = 5
+FAILED_LOGIN_LOCKOUT_MINUTES = 15
+
+
 @app.post("/login")
 def login(req: LoginRequest, db: Session = Depends(get_db)):
     email = req.email.strip().lower()
     user = db.query(User).filter(User.email == email).first()
+
+    # Locked out from too many recent failed attempts -- checked BEFORE
+    # verifying the password, so even the correct password is rejected
+    # while locked. Gives a clear, honest message (how long to wait)
+    # rather than reusing the generic "incorrect email or password" --
+    # this does weakly signal that the account exists (a made-up email
+    # can never trigger a lockout, since attempts are only tracked once
+    # a real User row is found), but that's a well-known, accepted
+    # tradeoff for real rate-limiting protection -- see the comment on
+    # User.failed_login_attempts in database.py for the full reasoning,
+    # including why this is per-account rather than per-IP.
+    if user is not None and user.login_locked_until is not None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        locked_until = user.login_locked_until
+        if locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=datetime.timezone.utc)
+        if now < locked_until:
+            minutes_left = max(1, int((locked_until - now).total_seconds() // 60) + 1)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many failed login attempts. Try again in {minutes_left} minute"
+                       f"{'s' if minutes_left != 1 else ''}.",
+            )
+
     if user is None or not auth.verify_password(req.password, user.password_hash):
+        if user is not None:
+            user.failed_login_attempts += 1
+            if user.failed_login_attempts >= FAILED_LOGIN_LOCKOUT_THRESHOLD:
+                user.login_locked_until = datetime.datetime.now(datetime.timezone.utc) + \
+                    datetime.timedelta(minutes=FAILED_LOGIN_LOCKOUT_MINUTES)
+            db.add(user)
+            db.commit()
         # Deliberately the same error for "no such user" and "wrong password"
         # -- don't leak which emails have accounts.
         raise HTTPException(status_code=401, detail="Incorrect email or password.")
+
+    # Successful login -- clear any accumulated failed attempts.
+    if user.failed_login_attempts > 0 or user.login_locked_until is not None:
+        user.failed_login_attempts = 0
+        user.login_locked_until = None
+        db.add(user)
+        db.commit()
 
     token = auth.create_access_token(user_id=user.id, email=user.email)
     return {

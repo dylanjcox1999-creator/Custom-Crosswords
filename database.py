@@ -81,6 +81,23 @@ class User(Base):
     # in localStorage) into this field as a welcome bonus.
     bonus_generations_remaining = Column(Integer, default=0, nullable=False)
 
+    # Login rate limiting: after FAILED_LOGIN_LOCKOUT_THRESHOLD consecutive
+    # wrong-password attempts, login_locked_until is set and further
+    # attempts are rejected until that time passes, regardless of whether
+    # the password given is actually correct -- see /login in main.py.
+    # Resets to 0 / None on any successful login. Tracked per-account
+    # (not per-IP): IP-based tracking was already rejected elsewhere in
+    # this codebase (see usage_limits.py) for the same reasons -- shared
+    # IPs, mobile NAT, trivial bypass by switching networks -- and those
+    # reasons apply here too. The tradeoff: this weakly leaks account
+    # existence (only a real account can ever show lockout behavior,
+    # never a made-up email), which is a known, accepted, industry-
+    # standard tradeoff for this kind of protection -- see the comment
+    # on /login for how the response message is kept as neutral as
+    # possible despite this.
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    login_locked_until = Column(DateTime, nullable=True)
+
     # Stripe's customer object ID for this user. Created lazily on first
     # checkout attempt (see stripe_service.get_or_create_customer) and
     # reused after that -- NOT the same as the subscription ID, since a
