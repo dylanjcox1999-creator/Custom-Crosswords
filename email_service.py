@@ -131,8 +131,64 @@ def send_welcome_email(to_email: str, display_name: str, bonus_generations: int 
                 f"{bonus_line}"
                 f"<p>Jump back in any time at "
                 f"<a href='https://topicross.app'>topicross.app</a>.</p>"
-                f"<p>Questions or feedback? Just reply to this email, or "
-                f"reach us at support@topicross.app.</p>"
+                f"<p>Questions or feedback? Reach us at support@topicross.app.</p>"
+            ),
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    return True
+
+
+def send_deletion_email(to_email: str, display_name: str) -> bool:
+    """
+    Attempts to send an account-deletion confirmation email via Resend,
+    right after a delete succeeds. Same honest-fallback shape as the
+    other two functions in this file. Two real reasons this exists, not
+    just a courtesy copy of the welcome email:
+
+      1. A paper trail. If a user later disputes a charge or asks
+         "did my account actually get deleted", a timestamped email
+         (from Resend's own delivery logs, not just this app's database,
+         which by definition no longer has the row to check) is real
+         evidence the deletion happened and when.
+      2. Account-takeover detection. If someone's account gets
+         compromised and deleted without their knowledge, this email to
+         their inbox -- sent to the email on file, not anywhere an
+         attacker chose -- is the only way they'd find out it happened.
+
+    Deliberately fire-and-forget from the caller's side (see how
+    /delete_account in main.py calls this): a failed send should never
+    block someone's ability to actually delete their account.
+    """
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        print(
+            f"[DELETION EMAIL -- NO EMAIL SERVICE CONFIGURED] "
+            f"Would have sent deletion confirmation to {to_email} ({display_name}). "
+            f"This was printed instead of emailed -- see email_service.py."
+        )
+        return False
+
+    from_address = os.environ.get("RESEND_FROM_ADDRESS", "onboarding@resend.dev")
+
+    response = requests.post(
+        RESEND_API_URL,
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={
+            "from": from_address,
+            "to": [to_email],
+            "subject": "Your TopiCross account has been deleted",
+            "html": (
+                f"<p>Hi {display_name},</p>"
+                f"<p>This confirms your TopiCross account and all associated "
+                f"solve history have been permanently deleted, along with any "
+                f"active subscription (no further charges will occur).</p>"
+                f"<p>If you didn't request this, contact us immediately at "
+                f"support@topicross.app.</p>"
+                f"<p>You're welcome back any time at "
+                f"<a href='https://topicross.app'>topicross.app</a> -- "
+                f"just sign up again with the same or a different email.</p>"
             ),
         },
         timeout=10,

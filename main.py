@@ -41,7 +41,7 @@ from historical_events import get_events_for_date
 from hints import get_hint, VALID_TIERS
 from topic_recommender import recommend_topics
 from clue_rewriter import reword_clue
-from email_service import send_reset_email, send_welcome_email
+from email_service import send_reset_email, send_welcome_email, send_deletion_email
 import stripe_service
 from usage_limits import (
     check_and_increment_usage, check_and_increment_reword_usage,
@@ -466,8 +466,22 @@ def delete_account(
                 f"{current_user.stripe_subscription_id} for user {current_user.email}: {e}"
             )
 
+    # Captured before deletion -- current_user's attributes shouldn't be
+    # relied on after db.delete()/db.commit() below.
+    deleted_email = current_user.email
+    deleted_display_name = _effective_display_name(current_user)
+
     db.delete(current_user)
     db.commit()
+
+    try:
+        send_deletion_email(deleted_email, deleted_display_name)
+    except Exception as e:
+        # Same reasoning as every other email call in this file: never
+        # let a failed send affect the actual operation, which already
+        # succeeded by this point -- just log it.
+        print(f"[delete_account] send_deletion_email failed for {deleted_email}: {e}")
+
     return {"deleted": True}
 
 
