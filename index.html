@@ -1532,6 +1532,17 @@ async function loadOnThisDayPuzzle() {
     `(Showing a sample puzzle -- today's couldn't be loaded right now.)`;
 }
 
+// Registered separately from DOMContentLoaded, outside the async init
+// flow below -- registration failing or being slow shouldn't hold up
+// anything else on the page. See sw.js for why this exists and why it
+// deliberately does nothing beyond satisfying installability.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {
+    // Non-fatal -- worst case, Add to Home Screen falls back to the
+    // lower-fidelity icon behavior it already had before this existed.
+  });
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
   updateAuthUI();
   setAccountCollapsed(!!authToken);
