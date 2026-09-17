@@ -394,6 +394,7 @@
         <div class="stat-card"><div class="stat-num" id="stat-longest-streak">-</div><div class="stat-label">Longest Streak</div></div>
         <div class="stat-card"><div class="stat-num" id="stat-completion">-</div><div class="stat-label">Completion Rate</div></div>
       </div>
+      <div id="stats-share-area" style="margin-bottom: 12px;"></div>
       <div id="stat-fastest" style="font-size:0.85em; margin-bottom:8px;"></div>
       <div style="font-size:0.85em;"><b>Favorite topics:</b> <span id="stat-topics"></span></div>
       <div style="font-size:0.85em; margin-top:6px;"><b>By difficulty:</b> <span id="stat-difficulty"></span></div>
@@ -628,6 +629,7 @@ async function refreshTierStatus() {
 // docstring in main.py for why this is free while the full Stats
 // Dashboard below stays paid-only) ----------
 let currentStreakData = null; // { current_streak, longest_streak }
+let currentStatsData = null; // full /stats response, populated by loadStats()
 
 async function refreshStreakStatus() {
   const el = document.getElementById('streak-status');
@@ -689,6 +691,48 @@ async function shareStreak() {
     try {
       await navigator.clipboard.writeText(`${text} ${url}`);
       const el = document.getElementById('streak-status');
+      const original = el.innerHTML;
+      el.textContent = '📋 Copied to clipboard!';
+      setTimeout(() => { el.innerHTML = original; }, 2000);
+    } catch (e) {
+      alert(`${text} ${url}`);
+    }
+  }
+}
+
+function buildStatsShareText() {
+  const n = currentStatsData.total_solved;
+  // Leads with total solved rather than current streak -- unlike the
+  // streak share button (gated on an ACTIVE streak > 0), this one stays
+  // meaningful even right after a streak breaks, since a lifetime solved
+  // count never resets. Longest streak gets a mention too when there's
+  // one worth bragging about, since it's a real achievement independent
+  // of today's current streak.
+  const streakNote = currentStatsData.longest_streak_days > 0
+    ? ` (longest streak: ${currentStatsData.longest_streak_days} days)`
+    : '';
+  const url = currentUserId
+    ? `https://topicross.app/?ref=${currentUserId}`
+    : 'https://topicross.app';
+  const text = currentUserId
+    ? `🧩 I've solved ${n} crossword${n === 1 ? '' : 's'} on TopiCross${streakNote} — daily puzzles generated on any topic you want. Sign up with my link and we both get bonus puzzles!`
+    : `🧩 I've solved ${n} crossword${n === 1 ? '' : 's'} on TopiCross${streakNote} — daily puzzles generated on any topic you want.`;
+  return { text, url };
+}
+
+async function shareStats() {
+  if (!currentStatsData || currentStatsData.total_solved <= 0) return;
+  const { text, url } = buildStatsShareText();
+  if (navigator.share) {
+    try {
+      await navigator.share({ text, url });
+    } catch (e) {
+      // User cancelled the share sheet -- not an error, do nothing.
+    }
+  } else {
+    try {
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      const el = document.getElementById('stats-share-area');
       const original = el.innerHTML;
       el.textContent = '📋 Copied to clipboard!';
       setTimeout(() => { el.innerHTML = original; }, 2000);
@@ -1700,11 +1744,21 @@ async function loadStats() {
     }
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
     const data = await res.json();
+    currentStatsData = data;
 
     document.getElementById('stat-solved').textContent = `${data.total_solved}/${data.total_attempted}`;
     document.getElementById('stat-current-streak').textContent = `${data.current_streak_days}d`;
     document.getElementById('stat-longest-streak').textContent = `${data.longest_streak_days}d`;
     document.getElementById('stat-completion').textContent = `${Math.round(data.completion_rate * 100)}%`;
+
+    // Only shown once there's something real to brag about -- "I've solved
+    // 0 crosswords" isn't worth a share button, unlike the streak share
+    // (gated the same way on current_streak > 0), this one works even with
+    // a broken/zero current streak, since total solved never resets.
+    const shareArea = document.getElementById('stats-share-area');
+    shareArea.innerHTML = data.total_solved > 0
+      ? '<button onclick="shareStats()">Share your stats</button>'
+      : '';
 
     document.getElementById('stat-fastest').textContent = data.fastest_solve
       ? `⚡ Fastest solve: "${data.fastest_solve.topic}" in ${Math.round(data.fastest_solve.solve_time_seconds)}s`
