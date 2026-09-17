@@ -434,6 +434,16 @@
     <button id="suggest-topics-btn" onclick="suggestTopics()" style="background: var(--navy); width: 100%;">✨ Suggest topics for me</button>
   </div>
   <div id="topic-suggestions" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
+
+  <div style="margin-top: 8px;">
+    <a href="#" onclick="toggleOwnWords(); return false;" id="own-words-toggle" style="font-size:0.85em;">+ Add your own words &amp; clues</a>
+  </div>
+  <div id="own-words-panel" style="display:none; margin-top:8px;">
+    <div id="own-words-list"></div>
+    <button type="button" onclick="addOwnWordRow()" style="background: var(--gold); font-size:0.85em; padding: 6px 12px;">+ Add a word</button>
+    <div class="note">These are guaranteed to appear in your puzzle exactly as written -- great for names, dates, or inside jokes for a gift puzzle. The rest of the grid fills in around them. A topic above is optional if you add enough of your own words.</div>
+  </div>
+
   <div id="custom-status" class="status">Enter any topic and tap Generate.</div>
   <div id="custom-grid-container"></div>
   <div class="note">Your topic is sent securely to generate a real, solvable puzzle -- not a simplified approximation.</div>
@@ -1780,13 +1790,61 @@ async function recommendDifficulty() {
   }
 }
 
+let ownWordRowCount = 0;
+
+function toggleOwnWords() {
+  const panel = document.getElementById('own-words-panel');
+  const opening = panel.style.display === 'none';
+  panel.style.display = opening ? 'block' : 'none';
+  document.getElementById('own-words-toggle').textContent =
+    opening ? '\u2212 Add your own words & clues' : '+ Add your own words & clues';
+  if (opening && ownWordRowCount === 0) {
+    addOwnWordRow();
+  }
+}
+
+function addOwnWordRow() {
+  ownWordRowCount++;
+  const id = ownWordRowCount;
+  const row = document.createElement('div');
+  row.className = 'topic-input-row';
+  row.id = `own-word-row-${id}`;
+  row.style.marginTop = '6px';
+  row.innerHTML =
+    `<input type="text" id="own-word-${id}" placeholder="word (e.g. a name)" maxlength="12" style="flex:0.4;">` +
+    `<input type="text" id="own-clue-${id}" placeholder="clue for it">` +
+    `<button type="button" onclick="removeOwnWordRow(${id})" style="background:#8b1e2f; padding:8px 12px;">\u00d7</button>`;
+  document.getElementById('own-words-list').appendChild(row);
+}
+
+function removeOwnWordRow(id) {
+  const row = document.getElementById(`own-word-row-${id}`);
+  if (row) row.remove();
+}
+
+function collectRequiredEntries() {
+  const rows = document.querySelectorAll('#own-words-list .topic-input-row');
+  const entries = [];
+  rows.forEach(row => {
+    const wordInput = row.querySelector('input[id^="own-word-"]');
+    const clueInput = row.querySelector('input[id^="own-clue-"]');
+    const word = wordInput ? wordInput.value.trim() : '';
+    const clue = clueInput ? clueInput.value.trim() : '';
+    if (word && clue) entries.push({ word, clue });
+  });
+  return entries;
+}
+
 async function generateCustomPuzzle() {
   const topic = document.getElementById('topic-input').value.trim();
   const difficulty = document.getElementById('difficulty-select').value;
   const statusEl = document.getElementById('custom-status');
   const btn = document.getElementById('generate-btn');
-  if (!topic) {
-    statusEl.textContent = 'Enter a topic first.';
+  const requiredEntries = collectRequiredEntries();
+  const displayTopic = topic || 'my custom puzzle';
+
+  if (!topic && requiredEntries.length === 0) {
+    statusEl.textContent = 'Enter a topic, or add your own words below, or both.';
     return;
   }
   if (!backendAvailable) {
@@ -1797,8 +1855,8 @@ async function generateCustomPuzzle() {
 
   btn.disabled = true;
   statusEl.textContent = authToken
-    ? `Generating a ${difficulty} puzzle for "${topic}"...`
-    : `Generating your free trial puzzle for "${topic}"...`;
+    ? `Generating a ${difficulty} puzzle for "${displayTopic}"...`
+    : `Generating your free trial puzzle for "${displayTopic}"...`;
   document.getElementById('custom-grid-container').innerHTML = '';
 
   const headers = { 'Content-Type': 'application/json' };
@@ -1812,7 +1870,7 @@ async function generateCustomPuzzle() {
     const res = await fetch(`${API_BASE_URL}/generate_puzzle`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ topic, num_words: 13, difficulty }),
+      body: JSON.stringify({ topic, num_words: 13, difficulty, required_entries: requiredEntries }),
       signal: AbortSignal.timeout(30000), // word-bank generation + grid placement can take a few seconds
     });
     if (res.status === 401) {
@@ -1829,14 +1887,14 @@ async function generateCustomPuzzle() {
     }
     const data = await res.json();
     const puzzle = adaptBackendPuzzle(data);
-    renderPuzzle('custom-grid-container', puzzle, topic);
+    renderPuzzle('custom-grid-container', puzzle, displayTopic);
     const remainingNote = typeof data.daily_actions_remaining === 'number' && data.daily_actions_remaining >= 0
       ? authToken
         ? ` (${data.daily_actions_remaining} free generations left today)`
         : ` (${data.daily_actions_remaining} free trial generations left, ever)`
       : '';
     statusEl.textContent =
-      `Placed ${puzzle.placed.length} of ${data.word_bank_used.length} words for "${topic}" ` +
+      `Placed ${puzzle.placed.length} of ${data.word_bank_used.length} words for "${displayTopic}" ` +
       `(${difficulty}).${remainingNote}`;
   } catch (err) {
     statusEl.textContent = 'Error generating puzzle: ' + err.message;

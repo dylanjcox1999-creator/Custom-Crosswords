@@ -77,10 +77,21 @@ def on_startup():
     database.init_db()
 
 
+class RequiredEntry(BaseModel):
+    word: str
+    clue: str
+
+
 class TopicRequest(BaseModel):
-    topic: str
+    topic: str = ""
     num_words: int = 13
     difficulty: str = "medium"  # "easy" | "medium" | "hard"
+    # Optional user-supplied must-include words/clues -- e.g. a name, a
+    # year, a personal in-joke for a gift puzzle. When given, `topic`
+    # becomes optional (Claude infers a theme from these instead, if none
+    # is given) -- see generate_word_bank's docstring in claude_wordbank.py
+    # for the full reasoning.
+    required_entries: list[RequiredEntry] = []
 
 
 class HintRequest(BaseModel):
@@ -814,18 +825,35 @@ def generate_puzzle(
     x_anonymous_id: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    if not req.topic or not req.topic.strip():
-        raise HTTPException(status_code=400, detail="Topic cannot be empty.")
+    has_required = len(req.required_entries) > 0
+    if (not req.topic or not req.topic.strip()) and not has_required:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a topic, some of your own words and clues, or both.",
+        )
     if not (5 <= req.num_words <= 20):
         raise HTTPException(status_code=400, detail="num_words must be between 5 and 20.")
+    if len(req.required_entries) > req.num_words:
+        raise HTTPException(
+            status_code=400,
+            detail=f"You've entered {len(req.required_entries)} words, which is more than "
+                   f"the puzzle size of {req.num_words} -- increase the puzzle size or remove some words.",
+        )
 
     remaining = _check_usage_for_request(current_user, x_anonymous_id, db)
 
     try:
+        required_tuples = [(e.word, e.clue) for e in req.required_entries]
         entries = generate_word_bank(
-            req.topic.strip(), n_words=req.num_words, difficulty=req.difficulty
+            req.topic.strip(), n_words=req.num_words, difficulty=req.difficulty,
+            required_entries=required_tuples,
         )
-        result = build_puzzle_response(entries, seed_base=abs(hash(req.topic)) % 10000)
+        # Seed needs SOMETHING to hash even when topic is empty (an
+        # all-required-words puzzle) -- fall back to the required words
+        # themselves so the seed is still deterministic per-request rather
+        # than defaulting to a constant.
+        seed_source = req.topic or "".join(w for w, _ in required_tuples)
+        result = build_puzzle_response(entries, seed_base=abs(hash(seed_source)) % 10000)
     except (ValueError, HTTPException) as e:
         # Generation can fail at TWO separate stages: Claude's word bank
         # (ValueError) or grid placement afterward (build_puzzle_response
