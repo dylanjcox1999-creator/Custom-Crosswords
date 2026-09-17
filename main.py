@@ -46,7 +46,7 @@ import stripe_service
 from usage_limits import (
     check_and_increment_usage, check_and_increment_reword_usage,
     check_and_increment_anonymous_usage, UsageLimitExceeded,
-    ANONYMOUS_TRIAL_LIFETIME_LIMIT,
+    ANONYMOUS_TRIAL_LIFETIME_LIMIT, REFERRAL_BONUS_AMOUNT, REFERRAL_MAX_CREDITED_SIGNUPS,
 )
 from stats import build_stats, compute_streaks
 import auth
@@ -122,6 +122,10 @@ class SignupRequest(BaseModel):
     # bonus_generations_remaining's comment in database.py for why this
     # merge needs to exist at all.
     anon_id: Optional[str] = None
+    # Optional: the numeric user ID of whoever referred this signup (from
+    # the ?ref= link parameter). If valid, both this new account and the
+    # referrer get a bonus -- see the referral section in /signup below.
+    referred_by: Optional[int] = None
 
 
 class LoginRequest(BaseModel):
@@ -311,6 +315,23 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
             bonus_granted = max(0, ANONYMOUS_TRIAL_LIFETIME_LIMIT - anon_usage.daily_actions_used)
             user.bonus_generations_remaining = bonus_granted
 
+    # Referral bonus: both sides get REFERRAL_BONUS_AMOUNT if this signup
+    # came through a valid ?ref= link. Silently no-ops (signup still
+    # proceeds normally) if the referrer ID doesn't exist or has already
+    # hit REFERRAL_MAX_CREDITED_SIGNUPS -- a stale or bad referral link
+    # should never be able to block someone from actually signing up.
+    referral_bonus_granted = 0
+    if req.referred_by:
+        referrer = db.query(User).filter(User.id == req.referred_by).first()
+        if referrer and referrer.referral_count < REFERRAL_MAX_CREDITED_SIGNUPS:
+            referral_bonus_granted = REFERRAL_BONUS_AMOUNT
+            user.bonus_generations_remaining += referral_bonus_granted
+            referrer.bonus_generations_remaining += REFERRAL_BONUS_AMOUNT
+            referrer.referral_count += 1
+            db.add(referrer)
+
+    total_bonus_granted = bonus_granted + referral_bonus_granted
+
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -318,7 +339,7 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
     token = auth.create_access_token(user_id=user.id, email=user.email)
 
     try:
-        send_welcome_email(user.email, _effective_display_name(user), bonus_generations=bonus_granted)
+        send_welcome_email(user.email, _effective_display_name(user), bonus_generations=total_bonus_granted)
     except Exception as e:
         # Same reasoning as forgot_password's send_reset_email call below:
         # a failed send (e.g. Resend rejects it, or isn't configured yet)
@@ -330,7 +351,7 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
         "access_token": token, "token_type": "bearer",
         "email": user.email, "display_name": _effective_display_name(user),
         "tier": user.tier,
-        "bonus_generations_granted": bonus_granted,
+        "bonus_generations_granted": total_bonus_granted,
     }
 
 
@@ -597,6 +618,7 @@ def get_me(current_user: User = Depends(get_current_user)):
     user's current tier (e.g. right after redirecting back from Stripe
     Checkout, to see whether the webhook has flipped it yet)."""
     return {
+        "id": current_user.id,
         "email": current_user.email,
         "display_name": _effective_display_name(current_user),
         "tier": current_user.tier,

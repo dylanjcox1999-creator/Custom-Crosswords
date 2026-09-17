@@ -473,6 +473,10 @@ let authToken = localStorage.getItem('cc_auth_token') || null;
 let authEmail = localStorage.getItem('cc_auth_email') || null;
 let authDisplayName = localStorage.getItem('cc_auth_display_name') || null;
 let currentTier = null; // populated by refreshTierStatus() once logged in
+let currentUserId = null; // populated by refreshTierStatus() -- own numeric id, used to build a personal referral link
+// Captured on page load from ?ref=<user_id> if present (see DOMContentLoaded),
+// and sent along with a signup request so both sides of a referral get credited.
+let pendingReferralCode = null;
 
 // ---------- Anonymous trial ID ----------
 // A random ID generated once per browser, stored in localStorage, used to
@@ -590,6 +594,7 @@ async function refreshTierStatus() {
     });
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
     const data = await res.json();
+    currentUserId = data.id;
     currentTier = data.tier;
     if (data.tier === 'paid' && data.subscription_cancel_at_period_end && data.subscription_period_end) {
       // Cancelled via the billing portal, but Stripe's default flow
@@ -656,8 +661,14 @@ async function refreshStreakStatus() {
 
 function buildStreakShareText() {
   const n = currentStreakData.current_streak;
-  const text = `🔥 I'm on a ${n} day streak on TopiCross — daily crosswords generated on any topic you want. Can you beat it?`;
-  const url = 'https://topicross.app';
+  // Falls back to the plain URL if currentUserId hasn't loaded yet for some
+  // reason -- sharing still works, it just won't carry a referral credit.
+  const url = currentUserId
+    ? `https://topicross.app/?ref=${currentUserId}`
+    : 'https://topicross.app';
+  const text = currentUserId
+    ? `🔥 I'm on a ${n} day streak on TopiCross — daily crosswords generated on any topic you want. Sign up with my link and we both get bonus puzzles. Can you beat my streak?`
+    : `🔥 I'm on a ${n} day streak on TopiCross — daily crosswords generated on any topic you want. Can you beat it?`;
   return { text, url };
 }
 
@@ -880,15 +891,17 @@ async function doSignup() {
   // trial credits get merged into the new account as a one-time bonus,
   // instead of silently disappearing the moment someone becomes a
   // logged-in user (see bonus_generations_remaining's comment in
-  // database.py for the full reasoning).
-  await authRequest('/signup', 'Account created and logged in.', displayName || null, anonymousId);
+  // database.py for the full reasoning). Also sends pendingReferralCode,
+  // if this page was opened from a shared streak link, so both sides of
+  // the referral get credited.
+  await authRequest('/signup', 'Account created and logged in.', displayName || null, anonymousId, pendingReferralCode);
 }
 
 async function doLogin() {
   await authRequest('/login', 'Logged in.', null);
 }
 
-async function authRequest(path, successMessage, displayName, anonId) {
+async function authRequest(path, successMessage, displayName, anonId, referredBy) {
   const email = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
   const statusEl = document.getElementById('auth-status');
@@ -904,6 +917,7 @@ async function authRequest(path, successMessage, displayName, anonId) {
   const body = { email, password };
   if (displayName) body.display_name = displayName;
   if (anonId) body.anon_id = anonId;
+  if (referredBy) body.referred_by = referredBy;
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, {
       method: 'POST',
@@ -1562,6 +1576,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   if (params.get('reset_token')) {
     document.getElementById('reset-password-section').style.display = 'block';
+  }
+
+  // Captured here (not read fresh at signup time) because the ?ref= param
+  // gets stripped from the URL below if a checkout redirect also ran --
+  // and someone might browse around a bit before actually signing up.
+  const refParam = params.get('ref');
+  if (refParam && /^\d+$/.test(refParam)) {
+    pendingReferralCode = parseInt(refParam, 10);
   }
 
   if (authToken) {

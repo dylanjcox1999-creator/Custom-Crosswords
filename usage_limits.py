@@ -81,6 +81,17 @@ FREE_TIER_GENERATE_DAILY_LIMIT = 1
 FREE_TIER_REWORD_DAILY_LIMIT = 3
 ANONYMOUS_TRIAL_LIFETIME_LIMIT = 3
 
+# Referral bonus: both the referrer and the new signup get this many bonus
+# generations (see User.bonus_generations_remaining) when a signup includes
+# a valid ?ref= from an existing user.
+REFERRAL_BONUS_AMOUNT = 3
+
+# Caps how many of a single user's referrals actually earn a bonus (see
+# User.referral_count). High enough that no genuine sharer would ever
+# notice it, low enough to bound the real cost of someone deliberately
+# farming fake signups -- same reasoning as the paid-tier fair-use caps.
+REFERRAL_MAX_CREDITED_SIGNUPS = 20
+
 # Fair-use ceiling for paid accounts -- see the module docstring above for
 # why this exists despite paid being marketed as "unlimited". Deliberately
 # generous: 25 generations/day is one roughly every 30-45 minutes of a

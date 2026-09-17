@@ -69,17 +69,24 @@ class User(Base):
 
     # One-time bonus generations, separate from and consumed BEFORE the
     # daily free-tier cap in usage_limits.py's check_and_increment_usage.
-    # Exists to fix a real gap: /generate_puzzle's logged-in-vs-anonymous
-    # check is an either/or (see _check_usage_for_request in main.py) --
-    # once authenticated, a user's remaining anonymous trial credits
-    # (ANONYMOUS_TRIAL_LIFETIME_LIMIT) become permanently unreachable,
-    # meaning someone who signs up BEFORE using their free trial loses
-    # those credits entirely, while someone who plays anonymously first
-    # and signs up after keeps what they used. That's backwards -- signing
-    # up should never leave someone worse off. /signup merges any unused
-    # anonymous credits (looked up by the anon_id the frontend still has
-    # in localStorage) into this field as a welcome bonus.
+    # Two things feed into this field:
+    #   1. Unused anonymous trial credits merged in at signup (see /signup) --
+    #      fixes a real gap where authenticating made the anonymous trial
+    #      pool permanently unreachable, so someone who signed up before
+    #      using their trial lost those credits entirely.
+    #   2. Referral bonuses (see referral_count below) -- both sides of a
+    #      referral get REFERRAL_BONUS_AMOUNT added here when a new
+    #      signup includes a valid ?ref= from an existing user.
     bonus_generations_remaining = Column(Integer, default=0, nullable=False)
+
+    # How many successful referrals this user has been credited for.
+    # Capped in usage_limits.py's REFERRAL_MAX_CREDITED_SIGNUPS -- without
+    # a cap, referral bonus is a real, unbounded cost exposure (each
+    # bonus generation still costs a real Claude API call once spent),
+    # the same reasoning that led to capping "unlimited" paid usage
+    # earlier. A generous cap doesn't limit genuine sharing; it only
+    # bounds the cost of someone deliberately farming fake signups.
+    referral_count = Column(Integer, default=0, nullable=False)
 
     # Login rate limiting: after FAILED_LOGIN_LOCKOUT_THRESHOLD consecutive
     # wrong-password attempts, login_locked_until is set and further
