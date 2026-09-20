@@ -291,6 +291,7 @@
 
 <h1>TopiCross</h1>
 <div class="subtitle">Crossword puzzles generated on any topic you want, plus today's real "On This Day" puzzle</div>
+<div id="verify-banner" style="display:none; margin-bottom:16px;"></div>
 <div style="text-align:center; margin-bottom: 18px;">
   <span id="backend-indicator" class="backend-status offline">Backend: checking...</span>
 </div>
@@ -339,6 +340,7 @@
   <div id="logged-in-view" style="display:none;">
     Logged in as <b id="logged-in-email"></b>.
     <button onclick="doLogout()" style="margin-left: 8px;">Log Out</button>
+    <div id="verify-reminder" style="display:none; margin-top:10px;"></div>
     <div class="topic-input-row" style="margin-top: 8px;">
       <input type="text" id="new-display-name" placeholder="change display name">
       <button onclick="doUpdateDisplayName()">Save</button>
@@ -475,6 +477,7 @@ let authEmail = localStorage.getItem('cc_auth_email') || null;
 let authDisplayName = localStorage.getItem('cc_auth_display_name') || null;
 let currentTier = null; // populated by refreshTierStatus() once logged in
 let currentUserId = null; // populated by refreshTierStatus() -- own numeric id, used to build a personal referral link
+let currentEmailVerified = null; // populated by refreshTierStatus() from /me
 // Captured on page load from ?ref=<user_id> if present (see DOMContentLoaded),
 // and sent along with a signup request so both sides of a referral get credited.
 let pendingReferralCode = null;
@@ -568,6 +571,7 @@ function doLogout() {
   authEmail = null;
   authDisplayName = null;
   currentTier = null;
+  currentEmailVerified = null;
   localStorage.removeItem('cc_auth_token');
   localStorage.removeItem('cc_auth_email');
   localStorage.removeItem('cc_auth_display_name');
@@ -575,6 +579,7 @@ function doLogout() {
   document.getElementById('billing-status').textContent = 'Log in to manage billing.';
   document.getElementById('streak-status').textContent = 'Log in to see your streak.';
   document.getElementById('auth-status').textContent = 'Logged out.';
+  document.getElementById('verify-reminder').style.display = 'none';
   // Expand again on logout -- they need to see the login form.
   setAccountCollapsed(false);
 }
@@ -597,6 +602,8 @@ async function refreshTierStatus() {
     const data = await res.json();
     currentUserId = data.id;
     currentTier = data.tier;
+    currentEmailVerified = data.email_verified;
+    renderVerifyReminder();
     if (data.tier === 'paid' && data.subscription_cancel_at_period_end && data.subscription_period_end) {
       // Cancelled via the billing portal, but Stripe's default flow
       // doesn't revoke access immediately -- it just stops the NEXT
@@ -884,6 +891,68 @@ async function doResetPassword() {
   }
 }
 
+// ---------- Email verification ----------
+// Handles a ?verify_token= link, works whether or not the browser
+// clicking it happens to be logged in -- the token itself is the proof,
+// same principle as the password-reset link.
+async function handleEmailVerification(token) {
+  const banner = document.getElementById('verify-banner');
+  banner.style.display = 'block';
+  banner.textContent = 'Verifying your email...';
+  try {
+    const res = await fetch(`${API_BASE_URL}/verify_email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+    banner.textContent = data.referral_bonus_credited
+      ? `✅ Email verified — and ${data.referral_bonus_amount} bonus generations just unlocked from your referral!`
+      : '✅ Email verified.';
+    currentEmailVerified = true;
+    renderVerifyReminder();
+  } catch (err) {
+    banner.textContent = '⚠ ' + err.message;
+  }
+  // Strip verify_token out of the URL so a refresh doesn't re-trigger this.
+  const url = new URL(window.location.href);
+  url.searchParams.delete('verify_token');
+  window.history.replaceState({}, '', url.pathname + url.search);
+}
+
+// Persistent reminder shown in the logged-in Account view for anyone who
+// hasn't verified yet -- deliberately not a hard gate on anything (see
+// email_verified's comment in database.py), just a visible nudge with a
+// one-tap way to get a fresh link.
+function renderVerifyReminder() {
+  const el = document.getElementById('verify-reminder');
+  if (!authToken || currentEmailVerified === null || currentEmailVerified === true) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+  el.innerHTML = '📧 Please verify your email — <button onclick="resendVerification()">Resend verification link</button>';
+}
+
+async function resendVerification() {
+  const el = document.getElementById('verify-reminder');
+  el.textContent = 'Sending...';
+  try {
+    const res = await fetch(`${API_BASE_URL}/resend_verification`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+    el.textContent = data.already_verified ? 'Already verified.' : '✅ Sent — check your inbox.';
+  } catch (err) {
+    el.textContent = '⚠ ' + err.message;
+  }
+}
+
 // ---------- Delete account ----------
 function showDeleteAccount() {
   document.getElementById('delete-account-panel').style.display = 'block';
@@ -972,10 +1041,17 @@ async function authRequest(path, successMessage, displayName, anonId, referredBy
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
     setAuth(data.access_token, data.email, data.display_name);
-    statusEl.textContent = (data.bonus_generations_granted > 0)
+    let msg = (data.bonus_generations_granted > 0)
       ? `${successMessage} 🎉 Plus, ${data.bonus_generations_granted} bonus generation` +
         `${data.bonus_generations_granted === 1 ? '' : 's'} carried over from your free trial.`
       : successMessage;
+    // data.email_verified is only present on a signup response (not
+    // login), so this only ever fires right after creating a new
+    // account, not on every subsequent login.
+    if (data.email_verified === false) {
+      msg += ' Check your email to verify your account.';
+    }
+    statusEl.textContent = msg;
   } catch (err) {
     statusEl.textContent = 'Error: ' + err.message;
   }
@@ -1628,6 +1704,32 @@ window.addEventListener('DOMContentLoaded', async () => {
   const refParam = params.get('ref');
   if (refParam && /^\d+$/.test(refParam)) {
     pendingReferralCode = parseInt(refParam, 10);
+  }
+
+  // If this page was opened from a verification email link, verify
+  // immediately -- doesn't require being logged in on this device/browser,
+  // since the token itself is the proof, the same way a password-reset
+  // link works without an existing session.
+  const verifyToken = params.get('verify_token');
+  if (verifyToken) {
+    await handleEmailVerification(verifyToken);
+  }
+
+  // Lets an external landing page (e.g. an SEO page for a specific topic)
+  // deep-link straight into "generate a puzzle about this" instead of
+  // just linking to the bare homepage -- closes the loop from someone
+  // searching for a topic to actually trying the real product.
+  const topicParam = params.get('topic');
+  if (topicParam) {
+    const topicInput = document.getElementById('topic-input');
+    if (topicInput) topicInput.value = topicParam;
+    // Scroll the generator into view since it's no longer the first
+    // thing on the page -- someone arriving with intent shouldn't have
+    // to hunt for it.
+    setTimeout(() => {
+      const genSection = document.getElementById('topic-input');
+      if (genSection) genSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 300);
   }
 
   if (authToken) {

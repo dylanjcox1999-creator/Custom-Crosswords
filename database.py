@@ -156,6 +156,26 @@ class User(Base):
     reset_token_hash = Column(String, nullable=True)
     reset_token_expires = Column(DateTime, nullable=True)
 
+    # Email verification. Not enforced as a hard gate on core features (a
+    # brand-new user can still generate puzzles immediately -- blocking
+    # that would hurt signup conversion for little real benefit). What it
+    # DOES gate: referral bonus crediting (see pending_referrer_id below)
+    # -- without verification, nothing stops someone from spinning up
+    # fake/disposable emails purely to farm referral credits, since the
+    # existing REFERRAL_MAX_CREDITED_SIGNUPS cap only limits credits per
+    # REFERRER, not per fake new account. Same hash-not-raw-token pattern
+    # as reset_token_hash above, and reuses the same auth.py helpers.
+    email_verified = Column(Boolean, default=False, nullable=False)
+    verification_token_hash = Column(String, nullable=True)
+    verification_token_expires = Column(DateTime, nullable=True)
+
+    # Set at signup if a valid ?ref= was present, left un-applied until
+    # this account actually verifies its email -- see main.py's /signup
+    # and /verify_email for where this gets set and consumed. Cleared
+    # back to None once the bonus is actually granted (or if verification
+    # never happens, it just... never happens, which is the point).
+    pending_referrer_id = Column(Integer, nullable=True)
+
     # cascade="all, delete-orphan": deleting a User automatically deletes
     # their SolveRecord rows too via the ORM (issues the child DELETEs
     # before the parent DELETE) -- needed for /delete_account to work

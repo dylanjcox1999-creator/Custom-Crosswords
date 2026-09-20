@@ -83,6 +83,48 @@ def send_reset_email(to_email: str, reset_link: str) -> bool:
     return True
 
 
+def send_verification_email(to_email: str, display_name: str, verify_link: str) -> bool:
+    """
+    Attempts to send an email-verification link via Resend, right after
+    signup. Same honest-fallback shape as the other functions in this
+    file. Not a hard gate on using the app (see email_verified's comment
+    in database.py) -- but it IS what unlocks a referral bonus if this
+    account was referred, so this email matters more than it might look
+    like a routine "confirm your email" message usually does.
+    """
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        print(
+            f"[VERIFICATION EMAIL -- NO EMAIL SERVICE CONFIGURED] "
+            f"Would have sent a verification link to {to_email} ({display_name}): {verify_link} "
+            f"This was printed instead of emailed -- see email_service.py."
+        )
+        return False
+
+    from_address = os.environ.get("RESEND_FROM_ADDRESS", "onboarding@resend.dev")
+
+    response = requests.post(
+        RESEND_API_URL,
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={
+            "from": from_address,
+            "to": [to_email],
+            "subject": "Verify your TopiCross email",
+            "html": (
+                f"<p>Hi {display_name},</p>"
+                f"<p>Quick confirmation that this is really your email address:</p>"
+                f"<p><a href='{verify_link}'>{verify_link}</a></p>"
+                f"<p>This link expires in 24 hours. You can keep using TopiCross either "
+                f"way -- verifying just confirms the account is really yours, and it's "
+                f"what unlocks a referral bonus if someone invited you.</p>"
+            ),
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    return True
+
+
 def send_welcome_email(to_email: str, display_name: str, bonus_generations: int = 0) -> bool:
     """
     Attempts to send a welcome email via Resend right after signup.

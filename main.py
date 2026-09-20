@@ -41,7 +41,7 @@ from historical_events import get_events_for_date
 from hints import get_hint, VALID_TIERS
 from topic_recommender import recommend_topics
 from clue_rewriter import reword_clue
-from email_service import send_reset_email, send_welcome_email, send_deletion_email
+from email_service import send_reset_email, send_welcome_email, send_deletion_email, send_verification_email
 import stripe_service
 from usage_limits import (
     check_and_increment_usage, check_and_increment_reword_usage,
@@ -144,6 +144,10 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
 
 
 class DeleteAccountRequest(BaseModel):
@@ -315,28 +319,43 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
             bonus_granted = max(0, ANONYMOUS_TRIAL_LIFETIME_LIMIT - anon_usage.daily_actions_used)
             user.bonus_generations_remaining = bonus_granted
 
-    # Referral bonus: both sides get REFERRAL_BONUS_AMOUNT if this signup
-    # came through a valid ?ref= link. Silently no-ops (signup still
-    # proceeds normally) if the referrer ID doesn't exist or has already
-    # hit REFERRAL_MAX_CREDITED_SIGNUPS -- a stale or bad referral link
-    # should never be able to block someone from actually signing up.
-    referral_bonus_granted = 0
+    # Referral bonus is deliberately NOT granted here anymore -- deferred
+    # until the new account actually verifies its email (see
+    # /verify_email below). Granting it immediately at signup, before any
+    # proof this is a real, reachable email address, would mean nothing
+    # stops someone from farming referral credits with disposable/fake
+    # addresses. We still validate the referrer's eligibility now (so a
+    # bad/stale link fails fast and clearly, rather than silently later),
+    # but the actual credit only happens on verification.
     if req.referred_by:
         referrer = db.query(User).filter(User.id == req.referred_by).first()
         if referrer and referrer.referral_count < REFERRAL_MAX_CREDITED_SIGNUPS:
-            referral_bonus_granted = REFERRAL_BONUS_AMOUNT
-            user.bonus_generations_remaining += referral_bonus_granted
-            referrer.bonus_generations_remaining += REFERRAL_BONUS_AMOUNT
-            referrer.referral_count += 1
-            db.add(referrer)
+            user.pending_referrer_id = req.referred_by
 
-    total_bonus_granted = bonus_granted + referral_bonus_granted
+    total_bonus_granted = bonus_granted
+
+    # Verification token, same hash-not-raw-token pattern as password
+    # reset (see auth.generate_reset_token's docstring) -- reused here
+    # rather than a separate helper, since the underlying mechanism is
+    # identical. 24-hour window: verification isn't as security-sensitive
+    # as a password reset link, so there's no reason to rush someone the
+    # way the 30-minute reset window deliberately does.
+    raw_verify_token, verify_token_hash = auth.generate_reset_token()
+    user.verification_token_hash = verify_token_hash
+    user.verification_token_expires = datetime.datetime.now(datetime.timezone.utc) + \
+        datetime.timedelta(hours=24)
 
     db.add(user)
     db.commit()
     db.refresh(user)
 
     token = auth.create_access_token(user_id=user.id, email=user.email)
+
+    verify_link = f"{FRONTEND_URL}?verify_token={raw_verify_token}"
+    try:
+        send_verification_email(user.email, _effective_display_name(user), verify_link)
+    except Exception as e:
+        print(f"[signup] send_verification_email failed for {user.email}: {e}")
 
     try:
         send_welcome_email(user.email, _effective_display_name(user), bonus_generations=total_bonus_granted)
@@ -352,7 +371,78 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
         "email": user.email, "display_name": _effective_display_name(user),
         "tier": user.tier,
         "bonus_generations_granted": total_bonus_granted,
+        "email_verified": False,
     }
+
+
+@app.post("/verify_email")
+def verify_email(req: VerifyEmailRequest, db: Session = Depends(get_db)):
+    token_hash = auth.hash_reset_token(req.token)
+    user = db.query(User).filter(User.verification_token_hash == token_hash).first()
+    if user is None:
+        raise HTTPException(status_code=400, detail="Invalid or already-used verification link.")
+
+    expires = user.verification_token_expires
+    if expires is not None and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=datetime.timezone.utc)
+    if expires is None or datetime.datetime.now(datetime.timezone.utc) > expires:
+        raise HTTPException(
+            status_code=400,
+            detail="This verification link has expired. Request a new one from your account settings.",
+        )
+
+    user.email_verified = True
+    user.verification_token_hash = None
+    user.verification_token_expires = None
+
+    # Apply the deferred referral bonus now that the email is confirmed
+    # real. Re-check the referrer's cap here, not just at signup time --
+    # the cap could have been hit by a DIFFERENT referral in the time
+    # between this user signing up and actually verifying.
+    referral_credited = False
+    if user.pending_referrer_id:
+        referrer = db.query(User).filter(User.id == user.pending_referrer_id).first()
+        if referrer and referrer.referral_count < REFERRAL_MAX_CREDITED_SIGNUPS:
+            user.bonus_generations_remaining += REFERRAL_BONUS_AMOUNT
+            referrer.bonus_generations_remaining += REFERRAL_BONUS_AMOUNT
+            referrer.referral_count += 1
+            db.add(referrer)
+            referral_credited = True
+        user.pending_referrer_id = None
+
+    db.add(user)
+    db.commit()
+
+    return {
+        "verified": True,
+        "referral_bonus_credited": referral_credited,
+        "referral_bonus_amount": REFERRAL_BONUS_AMOUNT if referral_credited else 0,
+    }
+
+
+@app.post("/resend_verification")
+def resend_verification(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.email_verified:
+        return {"already_verified": True}
+
+    raw_verify_token, verify_token_hash = auth.generate_reset_token()
+    current_user.verification_token_hash = verify_token_hash
+    current_user.verification_token_expires = datetime.datetime.now(datetime.timezone.utc) + \
+        datetime.timedelta(hours=24)
+    db.add(current_user)
+    db.commit()
+
+    verify_link = f"{FRONTEND_URL}?verify_token={raw_verify_token}"
+    try:
+        send_verification_email(current_user.email, _effective_display_name(current_user), verify_link)
+    except Exception as e:
+        print(f"[resend_verification] send_verification_email failed for {current_user.email}: {e}")
+        raise HTTPException(status_code=502, detail="Couldn't send the verification email -- try again shortly.")
+
+    return {"sent": True}
 
 
 FAILED_LOGIN_LOCKOUT_THRESHOLD = 5
@@ -620,6 +710,7 @@ def get_me(current_user: User = Depends(get_current_user)):
     return {
         "id": current_user.id,
         "email": current_user.email,
+        "email_verified": current_user.email_verified,
         "display_name": _effective_display_name(current_user),
         "tier": current_user.tier,
         "has_active_subscription": current_user.stripe_subscription_id is not None,
